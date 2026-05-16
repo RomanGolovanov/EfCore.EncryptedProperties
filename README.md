@@ -8,8 +8,12 @@ Property-level encryption for Entity Framework Core 9. Mark the properties that 
 
 ## Install
 
+```bash
+dotnet add package EfCore.EncryptedProperties
+```
+
 ```xml
-<PackageReference Include="EfCore.EncryptedProperties" Version="*" />
+<PackageReference Include="EfCore.EncryptedProperties" Version="1.0.0" />
 ```
 
 ## Quick Start
@@ -227,4 +231,3 @@ This protects data from being stored in plaintext in the database. It does not h
 ## License
 
 Apache License, Version 2.0.
-

@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>EfCore.EncryptedProperties.Testing</RootNamespace>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

@@ -2,6 +2,23 @@
 
   <PropertyGroup>
     <RootNamespace>EfCore.EncryptedProperties</RootNamespace>
+    <PackageId>EfCore.EncryptedProperties</PackageId>
+    <Title>EF Core Encrypted Properties</Title>
+    <Version>1.0.0</Version>
+    <Authors>RomanGolovanov</Authors>
+    <Description>Property-level encryption for Entity Framework Core using AES-GCM data encryption keys and RSA-wrapped key encryption keys.</Description>
+    <PackageTags>entity-framework-core;ef-core;encryption;aes-gcm;key-vault;privacy</PackageTags>
+    <PackageProjectUrl>https://github.com/RomanGolovanov/EfCore.EncryptedProperties</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/RomanGolovanov/EfCore.EncryptedProperties</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>Initial public release with transparent encrypted properties, explicit async encrypted values, file/in-memory/Azure Key Vault RSA providers, database/in-memory key chains, and key rotation support.</PackageReleaseNotes>
+    <PackageOutputPath>$(MSBuildProjectDirectory)/../../artifacts/packages</PackageOutputPath>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
 
   <ItemGroup>
@@ -9,10 +26,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.*" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.*" />
-    <PackageReference Include="Azure.Security.KeyVault.Keys" Version="4.*" />
-    <PackageReference Include="Azure.Identity" Version="1.*" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.16" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.16" />
+    <PackageReference Include="Azure.Security.KeyVault.Keys" Version="4.8.0" />
+    <PackageReference Include="Azure.Identity" Version="1.17.1" />
   </ItemGroup>
 
 </Project>
