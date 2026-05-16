@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>EfCore.EncryptedProperties.Testing</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EfCore.EncryptedProperties\EfCore.EncryptedProperties.csproj" />
+  </ItemGroup>
+
+</Project>

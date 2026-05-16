@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EfCore.EncryptedProperties/EfCore.EncryptedProperties.csproj" />
+    <Project Path="src/EfCore.EncryptedProperties.Testing/EfCore.EncryptedProperties.Testing.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EfCore.EncryptedProperties.Tests/EfCore.EncryptedProperties.Tests.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/EfCore.EncryptedProperties.Samples/EfCore.EncryptedProperties.Samples.csproj" />
+    <Project Path="samples/EfCore.EncryptedProperties.ApiSample/EfCore.EncryptedProperties.ApiSample.csproj" />
+  </Folder>
+</Solution>
