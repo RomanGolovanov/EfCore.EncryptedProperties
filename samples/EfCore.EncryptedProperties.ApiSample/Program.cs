@@ -44,7 +44,9 @@ app.MapPost("/customers", async (CreateCustomerRequest req, ApiSampleDbContext d
         Id = Guid.NewGuid(),
         Name = req.Name,
         Email = req.Email,
-        SecretNotes = req.SecretNotes
+        DateOfBirth = req.DateOfBirth,
+        SecretNotes = req.SecretNotes,
+        LoyaltyPoints = req.LoyaltyPoints
     };
     db.Customers.Add(customer);
     await db.SaveChangesAsync();
@@ -76,7 +78,9 @@ app.MapPut("/customers/{id:guid}", async (Guid id, UpdateCustomerRequest req, Ap
 
     if (req.Name is not null) customer.Name = req.Name;
     if (req.Email is not null) customer.Email = req.Email;
+    if (req.DateOfBirth is not null) customer.DateOfBirth = req.DateOfBirth.Value;
     if (req.SecretNotes is not null) customer.SecretNotes = req.SecretNotes;
+    if (req.LoyaltyPoints is not null) customer.LoyaltyPoints = req.LoyaltyPoints.Value;
 
     await db.SaveChangesAsync();
     return Results.Ok(await ToResponse(customer));
@@ -95,9 +99,15 @@ app.MapDelete("/customers/{id:guid}", async (Guid id, ApiSampleDbContext db) =>
 
 app.Run();
 
-static async Task<CustomerResponse> ToResponse(Customer c) => new(
-    c.Id,
-    c.Name,
-    c.Email,
-    await c.SecretNotes.GetDecryptedValueAsync() ?? string.Empty
-);
+static async Task<CustomerResponse> ToResponse(Customer c)
+{
+    var loyaltyPoints = await c.LoyaltyPoints.GetDecryptedValueAsync();
+
+    return new CustomerResponse(
+        c.Id,
+        c.Name,
+        c.Email,
+        c.DateOfBirth,
+        await c.SecretNotes.GetDecryptedValueAsync() ?? string.Empty,
+        loyaltyPoints);
+}

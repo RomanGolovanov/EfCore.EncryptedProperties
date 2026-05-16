@@ -10,6 +10,7 @@ internal sealed class DatabaseKeyChainStorage : IKeyChainStorage
 
     private readonly DbProviderFactory _providerFactory;
     private readonly string _connectionString;
+    private readonly DatabaseDialect _dialect;
 
     public DatabaseKeyChainStorage(DbProviderFactory providerFactory, string connectionString)
     {
@@ -23,6 +24,7 @@ internal sealed class DatabaseKeyChainStorage : IKeyChainStorage
 
         _providerFactory = providerFactory;
         _connectionString = connectionString;
+        _dialect = DetectDialect(connection);
     }
 
     public async ValueTask<EncryptedKeyRecord?> GetActiveAsync(string purpose, CancellationToken cancellationToken = default)
@@ -45,7 +47,7 @@ internal sealed class DatabaseKeyChainStorage : IKeyChainStorage
             {
                 return await GetOrActivateCoreAsync(purpose, rotateBefore, candidate, cancellationToken);
             }
-            catch (DbException ex) when (attempt < 3 && IsSqlDeadlock(ex))
+            catch (DbException ex) when (attempt < 5 && IsRetryableConcurrencyError(ex))
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(25 * (attempt + 1)), cancellationToken);
             }
@@ -90,7 +92,7 @@ internal sealed class DatabaseKeyChainStorage : IKeyChainStorage
         }
     }
 
-    private static async ValueTask<EncryptedKeyRecord?> GetActiveAsync(
+    private async ValueTask<EncryptedKeyRecord?> GetActiveAsync(
         DbConnection connection,
         DbTransaction? transaction,
         string purpose,
@@ -99,13 +101,7 @@ internal sealed class DatabaseKeyChainStorage : IKeyChainStorage
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        var tableHint = useUpdateLock ? " WITH (UPDLOCK, HOLDLOCK)" : string.Empty;
-        command.CommandText = $"""
-            SELECT TOP(1) {ColumnList}
-            FROM EncryptedPropertyKeks{tableHint}
-            WHERE Purpose = @purpose AND IsActive = @isActive
-            ORDER BY CreatedAt DESC
-            """;
+        command.CommandText = CreateGetActiveSql(useUpdateLock);
         AddParameter(command, "@purpose", DbType.String, purpose);
         AddParameter(command, "@isActive", DbType.Boolean, true);
 
@@ -240,9 +236,80 @@ internal sealed class DatabaseKeyChainStorage : IKeyChainStorage
             throw new ArgumentException("Candidate key must be active.", nameof(candidate));
     }
 
-    private static bool IsSqlDeadlock(DbException exception)
+    private string CreateGetActiveSql(bool useUpdateLock)
     {
-        return exception.GetType().GetProperty("Number")?.GetValue(exception) is 1205;
+        return _dialect switch
+        {
+            DatabaseDialect.SqlServer => CreateSqlServerGetActiveSql(useUpdateLock),
+            DatabaseDialect.Sqlite => $"""
+                SELECT {ColumnList}
+                FROM EncryptedPropertyKeks
+                WHERE Purpose = @purpose AND IsActive = @isActive
+                ORDER BY CreatedAt DESC
+                LIMIT 1
+                """,
+            _ => $"""
+                SELECT {ColumnList}
+                FROM EncryptedPropertyKeks
+                WHERE Purpose = @purpose AND IsActive = @isActive
+                ORDER BY CreatedAt DESC
+                """
+        };
+    }
+
+    private static string CreateSqlServerGetActiveSql(bool useUpdateLock)
+    {
+        var tableHint = useUpdateLock ? " WITH (UPDLOCK, HOLDLOCK)" : string.Empty;
+        return $"""
+            SELECT TOP(1) {ColumnList}
+            FROM EncryptedPropertyKeks{tableHint}
+            WHERE Purpose = @purpose AND IsActive = @isActive
+            ORDER BY CreatedAt DESC
+            """;
+    }
+
+    private static DatabaseDialect DetectDialect(DbConnection connection)
+    {
+        var typeName = connection.GetType().FullName ?? string.Empty;
+
+        if (typeName.StartsWith("Microsoft.Data.SqlClient.", StringComparison.Ordinal)
+            || typeName.StartsWith("System.Data.SqlClient.", StringComparison.Ordinal))
+        {
+            return DatabaseDialect.SqlServer;
+        }
+
+        if (typeName.StartsWith("Microsoft.Data.Sqlite.", StringComparison.Ordinal))
+            return DatabaseDialect.Sqlite;
+
+        return DatabaseDialect.Generic;
+    }
+
+    private static bool IsRetryableConcurrencyError(DbException exception)
+    {
+        if (GetIntProperty(exception, "Number") is 1205 or 2601 or 2627)
+            return true;
+
+        if (exception.GetType().FullName == "Microsoft.Data.Sqlite.SqliteException"
+            && GetIntProperty(exception, "SqliteErrorCode") is 5 or 6 or 19)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static int? GetIntProperty(Exception exception, string propertyName)
+    {
+        return exception.GetType().GetProperty(propertyName)?.GetValue(exception) is int value
+            ? value
+            : null;
+    }
+
+    private enum DatabaseDialect
+    {
+        Generic,
+        SqlServer,
+        Sqlite
     }
 
     private static EncryptedKeyRecord MapToRecord(DbDataReader reader)

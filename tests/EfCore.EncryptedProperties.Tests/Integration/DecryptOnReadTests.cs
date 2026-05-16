@@ -64,7 +64,22 @@ public class DecryptOnReadTests
         Assert.NotNull(storageProperty);
         Assert.Equal(typeof(string), storageProperty!.ClrType);
         Assert.Null(storageProperty.GetValueConverter());
+        Assert.Null(storageProperty.FindAnnotation(RelationalAnnotationNames.ColumnType));
         Assert.True((bool)storageProperty.FindAnnotation(EncryptedPropertyAnnotations.IsCiphertextStorage)!.Value!);
+    }
+
+    [Fact]
+    public void Model_EncryptedProperty_PreservesExplicitCiphertextColumnType()
+    {
+        using var provider = CreateProvider();
+        using var scope = provider.CreateScope();
+
+        var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+        var entityType = ctx.Model.FindEntityType(typeof(CustomerWithExplicitColumnType))!;
+        var storageProperty = entityType.FindProperty("__EncryptedProperties_Email");
+
+        Assert.NotNull(storageProperty);
+        Assert.Equal("TEXT", storageProperty!.FindAnnotation(RelationalAnnotationNames.ColumnType)?.Value);
     }
 
     [Fact]
@@ -193,6 +208,7 @@ public class DecryptOnReadTests
         public TestDbContext(DbContextOptions<TestDbContext> options) : base(options) { }
 
         public DbSet<CustomerDecryptOnRead> CustomersDecryptOnRead => Set<CustomerDecryptOnRead>();
+        public DbSet<CustomerWithExplicitColumnType> CustomersWithExplicitColumnType => Set<CustomerWithExplicitColumnType>();
         public DbSet<MultiTypeEntity> MultiTypeEntities => Set<MultiTypeEntity>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -201,6 +217,14 @@ public class DecryptOnReadTests
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Email).IsEncrypted();
+            });
+
+            modelBuilder.Entity<CustomerWithExplicitColumnType>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Email)
+                    .HasColumnType("TEXT")
+                    .IsEncrypted();
             });
 
             modelBuilder.Entity<MultiTypeEntity>(entity =>

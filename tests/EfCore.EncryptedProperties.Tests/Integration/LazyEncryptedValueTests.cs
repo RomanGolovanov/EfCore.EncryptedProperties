@@ -51,6 +51,36 @@ public class LazyEncryptedValueTests
     }
 
     [Fact]
+    public async Task SaveAndRead_Lazy_NonString_RoundTrip()
+    {
+        await using var provider = CreateProvider();
+        var id = Guid.NewGuid();
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+            ctx.CustomersLazy.Add(new CustomerLazy
+            {
+                Id = id,
+                Email = "number@example.com",
+                SecurityCode = 123456,
+                Name = "Number User"
+            });
+            await ctx.SaveChangesAsync();
+        }
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+            var customer = await ctx.CustomersLazy.FindAsync(id);
+
+            Assert.NotNull(customer);
+            var securityCode = await customer!.SecurityCode!.GetDecryptedValueAsync();
+            Assert.Equal(123456, securityCode);
+        }
+    }
+
+    [Fact]
     public async Task Update_LazyValue_Persists()
     {
         await using var provider = CreateProvider();
@@ -136,6 +166,7 @@ public class LazyEncryptedValueTests
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Email).IsEncrypted();
+                entity.Property(e => e.SecurityCode).IsEncrypted();
             });
         }
     }

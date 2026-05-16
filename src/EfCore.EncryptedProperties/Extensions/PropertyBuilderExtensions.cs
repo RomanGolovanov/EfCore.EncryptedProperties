@@ -1,5 +1,4 @@
 using EfCore.EncryptedProperties.Configuration;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace EfCore.EncryptedProperties.Extensions;
@@ -21,8 +20,6 @@ public static class PropertyBuilderExtensions
 
         builder.HasAnnotation(EncryptedPropertyAnnotations.Materialization,
             isLazy ? "Lazy" : "DecryptOnRead");
-
-        builder.HasColumnType("nvarchar(max)");
 
         return builder;
     }

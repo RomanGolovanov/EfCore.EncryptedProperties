@@ -8,6 +8,12 @@ public sealed class Customer
     // DecryptOnRead: transparent encryption, property stays as string
     public string Email { get; set; } = string.Empty;
 
+    // DecryptOnRead works for non-string values too
+    public DateTime DateOfBirth { get; set; }
+
     // Lazy: explicit decrypt via GetDecryptedValueAsync
     public EncryptedValue<string> SecretNotes { get; set; } = default!;
+
+    // Lazy non-string value
+    public EncryptedValue<int> LoyaltyPoints { get; set; } = default!;
 }

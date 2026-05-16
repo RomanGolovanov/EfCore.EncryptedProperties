@@ -20,10 +20,19 @@ public sealed class ApiSampleDbContext : DbContext
             entity.Property(e => e.Email)
                 .IsEncrypted();
 
+            entity.Property(e => e.DateOfBirth)
+                .IsEncrypted();
+
             entity.Property(e => e.SecretNotes)
                 .IsEncrypted(options =>
                 {
                     options.KeyPurpose = "notes";
+                });
+
+            entity.Property(e => e.LoyaltyPoints)
+                .IsEncrypted(options =>
+                {
+                    options.KeyPurpose = "loyalty";
                 });
         });
     }

@@ -53,7 +53,7 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
         var purpose = plaintextProperty.FindAnnotation(EncryptedPropertyAnnotations.KeyPurpose)?.Value as string ?? "default";
         var materialization = plaintextProperty.FindAnnotation(EncryptedPropertyAnnotations.Materialization)?.Value as string;
         var columnName = plaintextProperty.GetColumnName() ?? plaintextPropertyName;
-        var columnType = plaintextProperty.GetColumnType() ?? "nvarchar(max)";
+        var columnType = plaintextProperty.GetColumnType();
         var maxLength = plaintextProperty.GetMaxLength();
         var isUnicode = plaintextProperty.IsUnicode();
         var isRequired = !plaintextProperty.IsNullable;
@@ -82,7 +82,8 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
             fromDataAnnotation: false);
 
         ciphertextPropertyBuilder.HasColumnName(columnName, fromDataAnnotation: false);
-        ciphertextPropertyBuilder.HasColumnType(columnType, fromDataAnnotation: false);
+        if (columnType is not null)
+            ciphertextPropertyBuilder.HasColumnType(columnType, fromDataAnnotation: false);
         ciphertextPropertyBuilder.HasMaxLength(maxLength, fromDataAnnotation: false);
         ciphertextPropertyBuilder.IsUnicode(isUnicode, fromDataAnnotation: false);
         ciphertextPropertyBuilder.IsRequired(isRequired, fromDataAnnotation: false);

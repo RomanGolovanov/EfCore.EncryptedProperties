@@ -1,5 +1,5 @@
 using EfCore.EncryptedProperties.KeyManagement;
-using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 
 namespace EfCore.EncryptedProperties.Tests.KeyManagement;
 
@@ -8,9 +8,7 @@ public sealed class DatabaseKeyChainStorageTests
     [Fact]
     public async Task GetOrActivateAsync_ConcurrentCallers_CreateSingleActiveKey()
     {
-        var database = await TryCreateDatabaseAsync();
-        if (database is null)
-            return;
+        var database = CreateDatabase();
 
         try
         {
@@ -18,7 +16,7 @@ public sealed class DatabaseKeyChainStorageTests
 
             var tasks = Enumerable.Range(0, 12).Select(index =>
             {
-                var storage = new DatabaseKeyChainStorage(SqlClientFactory.Instance, database.ConnectionString);
+                var storage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
                 return storage.GetOrActivateAsync(
                     "default",
                     rotateBefore: null,
@@ -26,7 +24,7 @@ public sealed class DatabaseKeyChainStorageTests
             });
 
             var returnedRecords = await Task.WhenAll(tasks);
-            var readStorage = new DatabaseKeyChainStorage(SqlClientFactory.Instance, database.ConnectionString);
+            var readStorage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
             var records = await readStorage.GetAllAsync();
             var activeRecord = Assert.Single(records, r => r.Purpose == "default" && r.IsActive);
 
@@ -34,7 +32,7 @@ public sealed class DatabaseKeyChainStorageTests
         }
         finally
         {
-            await DropDatabaseAsync(database.Name);
+            DropDatabase(database);
         }
     }
 
@@ -52,50 +50,36 @@ public sealed class DatabaseKeyChainStorageTests
         };
     }
 
-    private static async Task<TestDatabase?> TryCreateDatabaseAsync()
+    private static TestDatabase CreateDatabase()
     {
-        var name = $"EfCoreEncryptedPropertiesTests_{Guid.NewGuid():N}";
-
-        try
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            $"EfCoreEncryptedPropertiesTests_{Guid.NewGuid():N}.db");
+        var builder = new SqliteConnectionStringBuilder
         {
-            await using var connection = new SqlConnection(GetMasterConnectionString());
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"CREATE DATABASE [{name}]";
-            await command.ExecuteNonQueryAsync();
-        }
-        catch (SqlException)
-        {
-            return null;
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-
-        var builder = new SqlConnectionStringBuilder(GetMasterConnectionString())
-        {
-            InitialCatalog = name
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false
         };
 
-        return new TestDatabase(name, builder.ConnectionString);
+        return new TestDatabase(path, builder.ConnectionString);
     }
 
     private static async Task CreateSchemaAsync(string connectionString)
     {
-        await using var connection = new SqlConnection(connectionString);
+        await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = """
             CREATE TABLE EncryptedPropertyKeks
             (
-                Id uniqueidentifier NOT NULL PRIMARY KEY,
-                Purpose nvarchar(128) NOT NULL,
-                RsaKeyId nvarchar(512) NOT NULL,
-                Algorithm nvarchar(64) NOT NULL,
-                EncryptedKey nvarchar(max) NOT NULL,
-                CreatedAt datetimeoffset NOT NULL,
-                IsActive bit NOT NULL
+                Id TEXT NOT NULL PRIMARY KEY,
+                Purpose TEXT NOT NULL,
+                RsaKeyId TEXT NOT NULL,
+                Algorithm TEXT NOT NULL,
+                EncryptedKey TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                IsActive INTEGER NOT NULL
             );
 
             CREATE INDEX IX_EncryptedPropertyKeks_Purpose_IsActive
@@ -108,28 +92,18 @@ public sealed class DatabaseKeyChainStorageTests
         await command.ExecuteNonQueryAsync();
     }
 
-    private static async Task DropDatabaseAsync(string name)
+    private static void DropDatabase(TestDatabase database)
     {
-        try
-        {
-            await using var connection = new SqlConnection(GetMasterConnectionString());
-            await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = $"""
-                ALTER DATABASE [{name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-                DROP DATABASE [{name}];
-                """;
-            await command.ExecuteNonQueryAsync();
-        }
-        catch (SqlException)
-        {
-        }
+        DeleteIfExists(database.Path);
+        DeleteIfExists(database.Path + "-shm");
+        DeleteIfExists(database.Path + "-wal");
     }
 
-    private static string GetMasterConnectionString()
+    private static void DeleteIfExists(string path)
     {
-        return "Server=(localdb)\\MSSQLLocalDB;Database=master;Trusted_Connection=True;TrustServerCertificate=True;";
+        if (File.Exists(path))
+            File.Delete(path);
     }
 
-    private sealed record TestDatabase(string Name, string ConnectionString);
+    private sealed record TestDatabase(string Path, string ConnectionString);
 }

@@ -11,7 +11,14 @@ public sealed class CustomerLazy
 {
     public Guid Id { get; set; }
     public EncryptedValue<string> Email { get; set; } = default!;
+    public EncryptedValue<int>? SecurityCode { get; set; }
     public string Name { get; set; } = string.Empty;
+}
+
+public sealed class CustomerWithExplicitColumnType
+{
+    public Guid Id { get; set; }
+    public string Email { get; set; } = string.Empty;
 }
 
 public sealed class MultiTypeEntity
