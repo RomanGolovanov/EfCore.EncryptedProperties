@@ -9,6 +9,7 @@ public sealed class Customer
     public string Email { get; set; } = string.Empty;
 
     // DecryptOnRead works for non-string values too
+    [Encrypted]
     public DateTime DateOfBirth { get; set; }
 
     // Lazy: explicit decrypt via GetDecryptedValueAsync

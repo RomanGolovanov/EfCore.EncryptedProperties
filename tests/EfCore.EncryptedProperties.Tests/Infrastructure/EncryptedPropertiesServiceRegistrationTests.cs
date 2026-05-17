@@ -1,7 +1,6 @@
 using System.Data.Common;
 using System.Security.Cryptography;
 using EfCore.EncryptedProperties.Abstractions;
-using EfCore.EncryptedProperties.Configuration;
 using EfCore.EncryptedProperties.Extensions;
 using EfCore.EncryptedProperties.Infrastructure;
 using EfCore.EncryptedProperties.KeyManagement;

@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Reflection;
 using EfCore.EncryptedProperties.Abstractions;
-using EfCore.EncryptedProperties.Configuration;
 using EfCore.EncryptedProperties.Infrastructure;
 using EfCore.EncryptedProperties.Metadata;
 using Microsoft.EntityFrameworkCore;
@@ -28,7 +26,7 @@ internal sealed class EncryptedPropertiesMaterializationInterceptor : IMateriali
         var model = GetModel(context);
 
         var entityTypeName = materializationData.EntityType.ClrType.FullName!;
-        var descriptors = model.GetForEntityType(entityTypeName).ToList();
+        var descriptors = model.GetForEntityType(entityTypeName);
 
         if (descriptors.Count == 0)
             return entity;
@@ -58,13 +56,12 @@ internal sealed class EncryptedPropertiesMaterializationInterceptor : IMateriali
         string? payload,
         EncryptedPropertyServices services)
     {
-        var propertyContext = CreatePropertyContext(descriptor);
         var plaintext = services.Cryptor
-            .DecryptAsync(payload, descriptor.ClrType, propertyContext)
+            .DecryptAsync(payload, descriptor.ClrType, descriptor.Context)
             .GetAwaiter()
             .GetResult();
 
-        var assignedValue = GetAssignableValue(plaintext, descriptor.ClrType);
+        var assignedValue = plaintext ?? descriptor.DefaultValue;
         SetClrPropertyValue(entity, descriptor, assignedValue);
         services.StateTracker.Track(entity, descriptor, assignedValue, payload);
     }
@@ -75,9 +72,8 @@ internal sealed class EncryptedPropertiesMaterializationInterceptor : IMateriali
         string? payload,
         EncryptedPropertyServices services)
     {
-        var propertyContext = CreatePropertyContext(descriptor);
-        var accessor = new EncryptedValueAccessor(services.Cryptor, propertyContext);
-        var encryptedValue = CreateEncryptedValue(descriptor.ClrType, payload, accessor);
+        var accessor = new EncryptedValueAccessor(services.Cryptor, descriptor.Context);
+        var encryptedValue = GetLazyAccessors(descriptor).CreateValue(payload, accessor);
 
         SetClrPropertyValue(entity, descriptor, encryptedValue);
         services.StateTracker.Track(entity, descriptor, plaintext: null, payload);
@@ -94,46 +90,16 @@ internal sealed class EncryptedPropertiesMaterializationInterceptor : IMateriali
         return materializationData.GetPropertyValue<string?>(property);
     }
 
-    private static object? GetAssignableValue(object? value, Type targetType)
-    {
-        if (value is not null)
-            return value;
-
-        return targetType.IsValueType && Nullable.GetUnderlyingType(targetType) is null
-            ? Activator.CreateInstance(targetType)
-            : null;
-    }
-
     private static void SetClrPropertyValue(object entity, EncryptedPropertyDescriptor descriptor, object? value)
     {
-        var property = entity.GetType().GetProperty(
-                descriptor.PropertyName,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+        descriptor.Accessors.SetValue(entity, value);
+    }
+
+    private static EncryptedValueAccessors GetLazyAccessors(EncryptedPropertyDescriptor descriptor)
+    {
+        return descriptor.Accessors.EncryptedValue
             ?? throw new InvalidOperationException(
-                $"Encrypted property '{entity.GetType().FullName}.{descriptor.PropertyName}' was not found.");
-
-        property.SetValue(entity, value);
-    }
-
-    private static object CreateEncryptedValue(Type innerType, string? payload, IEncryptedValueAccessor accessor)
-    {
-        var encryptedValueType = typeof(EncryptedValue<>).MakeGenericType(innerType);
-        return Activator.CreateInstance(
-            encryptedValueType,
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            args: [payload, accessor],
-            culture: null)!;
-    }
-
-    private static EncryptedPropertyContext CreatePropertyContext(EncryptedPropertyDescriptor descriptor)
-    {
-        return new EncryptedPropertyContext
-        {
-            Purpose = descriptor.Purpose,
-            EntityTypeName = descriptor.EntityTypeName,
-            PropertyName = descriptor.PropertyName
-        };
+                $"Encrypted property '{descriptor.EntityTypeName}.{descriptor.PropertyName}' is not configured for lazy encrypted values.");
     }
 
     private EncryptedPropertyServices GetServices(DbContext context)

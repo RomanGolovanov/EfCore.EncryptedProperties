@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Reflection;
 using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Configuration;
 using EfCore.EncryptedProperties.Infrastructure;
@@ -15,7 +14,6 @@ namespace EfCore.EncryptedProperties.Interceptors;
 
 internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInterceptor
 {
-    private static readonly BindingFlags InstanceNonPublic = BindingFlags.Instance | BindingFlags.NonPublic;
     private readonly IEncryptedPropertyCryptor _cryptor;
     private readonly ConcurrentDictionary<IModel, EncryptedPropertyModel> _models = new();
 
@@ -142,8 +140,7 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
         if (!ShouldWriteDecryptOnReadValue(entry, descriptor, services.StateTracker, currentValue))
             return;
 
-        var propertyContext = CreatePropertyContext(descriptor);
-        var payload = encrypt(currentValue, propertyContext);
+        var payload = encrypt(currentValue, descriptor.Context);
         WriteCiphertext(entry, descriptor, payload);
         services.StateTracker.Track(entry.Entity, descriptor, currentValue, payload);
     }
@@ -155,8 +152,7 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
         object? currentValue,
         Func<object?, EncryptedPropertyContext, ValueTask<string?>> encrypt)
     {
-        var propertyContext = CreatePropertyContext(descriptor);
-        var payload = await encrypt(currentValue, propertyContext);
+        var payload = await encrypt(currentValue, descriptor.Context);
         WriteCiphertext(entry, descriptor, payload);
         services.StateTracker.Track(entry.Entity, descriptor, currentValue, payload);
     }
@@ -208,12 +204,12 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
             return;
         }
 
-        var evType = currentValue.GetType();
-        if (!IsEncryptedValueType(evType))
+        var lazyAccessors = GetLazyAccessors(descriptor);
+        if (!lazyAccessors.ValueType.IsInstanceOfType(currentValue))
             return;
 
-        var isModified = GetInternalProperty<bool>(currentValue, "IsModified");
-        var payload = GetInternalProperty<string?>(currentValue, "Payload");
+        var isModified = lazyAccessors.GetIsModified(currentValue);
+        var payload = lazyAccessors.GetPayload(currentValue);
 
         if (!isModified)
         {
@@ -226,9 +222,8 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
             return;
         }
 
-        var plaintext = GetInternalProperty<object?>(currentValue, "PlaintextOrDefault");
-        var propertyContext = CreatePropertyContext(descriptor);
-        var encryptedPayload = await encrypt(plaintext, propertyContext);
+        var plaintext = lazyAccessors.GetPlaintext(currentValue);
+        var encryptedPayload = await encrypt(plaintext, descriptor.Context);
         WriteLazyEncryptedValue(entry, descriptor, services, plaintext, encryptedPayload);
     }
 
@@ -245,12 +240,12 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
             return;
         }
 
-        var evType = currentValue.GetType();
-        if (!IsEncryptedValueType(evType))
+        var lazyAccessors = GetLazyAccessors(descriptor);
+        if (!lazyAccessors.ValueType.IsInstanceOfType(currentValue))
             return;
 
-        var isModified = GetInternalProperty<bool>(currentValue, "IsModified");
-        var payload = GetInternalProperty<string?>(currentValue, "Payload");
+        var isModified = lazyAccessors.GetIsModified(currentValue);
+        var payload = lazyAccessors.GetPayload(currentValue);
 
         if (!isModified)
         {
@@ -263,9 +258,8 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
             return;
         }
 
-        var plaintext = GetInternalProperty<object?>(currentValue, "PlaintextOrDefault");
-        var propertyContext = CreatePropertyContext(descriptor);
-        var encryptedPayload = encrypt(plaintext, propertyContext);
+        var plaintext = lazyAccessors.GetPlaintext(currentValue);
+        var encryptedPayload = encrypt(plaintext, descriptor.Context);
         WriteLazyEncryptedValue(entry, descriptor, services, plaintext, encryptedPayload);
     }
 
@@ -311,8 +305,8 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
     {
         WriteCiphertext(entry, descriptor, payload);
 
-        var accessor = new EncryptedValueAccessor(services.Cryptor, CreatePropertyContext(descriptor));
-        var newValue = CreateEncryptedValue(descriptor.ClrType, payload, accessor);
+        var accessor = new EncryptedValueAccessor(services.Cryptor, descriptor.Context);
+        var newValue = GetLazyAccessors(descriptor).CreateValue(payload, accessor);
         SetClrPropertyValue(entry.Entity, descriptor, newValue);
         services.StateTracker.Track(entry.Entity, descriptor, plaintext, payload);
     }
@@ -350,55 +344,19 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
 
     private static object? GetClrPropertyValue(object entity, EncryptedPropertyDescriptor descriptor)
     {
-        var property = GetClrProperty(entity, descriptor);
-        return property.GetValue(entity);
+        return descriptor.Accessors.GetValue(entity);
     }
 
     private static void SetClrPropertyValue(object entity, EncryptedPropertyDescriptor descriptor, object? value)
     {
-        var property = GetClrProperty(entity, descriptor);
-        property.SetValue(entity, value);
+        descriptor.Accessors.SetValue(entity, value);
     }
 
-    private static PropertyInfo GetClrProperty(object entity, EncryptedPropertyDescriptor descriptor)
+    private static EncryptedValueAccessors GetLazyAccessors(EncryptedPropertyDescriptor descriptor)
     {
-        return entity.GetType().GetProperty(
-                descriptor.PropertyName,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+        return descriptor.Accessors.EncryptedValue
             ?? throw new InvalidOperationException(
-                $"Encrypted property '{entity.GetType().FullName}.{descriptor.PropertyName}' was not found.");
-    }
-
-    private static T? GetInternalProperty<T>(object instance, string propertyName)
-    {
-        var value = instance.GetType().GetProperty(propertyName, InstanceNonPublic)?.GetValue(instance);
-        return value is null ? default : (T)value;
-    }
-
-    private static bool IsEncryptedValueType(Type type)
-    {
-        return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(EncryptedValue<>);
-    }
-
-    private static object CreateEncryptedValue(Type innerType, string? payload, IEncryptedValueAccessor accessor)
-    {
-        var encryptedValueType = typeof(EncryptedValue<>).MakeGenericType(innerType);
-        return Activator.CreateInstance(
-            encryptedValueType,
-            BindingFlags.Instance | BindingFlags.NonPublic,
-            binder: null,
-            args: [payload, accessor],
-            culture: null)!;
-    }
-
-    private static EncryptedPropertyContext CreatePropertyContext(EncryptedPropertyDescriptor descriptor)
-    {
-        return new EncryptedPropertyContext
-        {
-            Purpose = descriptor.Purpose,
-            EntityTypeName = descriptor.EntityTypeName,
-            PropertyName = descriptor.PropertyName
-        };
+                $"Encrypted property '{descriptor.EntityTypeName}.{descriptor.PropertyName}' is not configured for lazy encrypted values.");
     }
 
     private EncryptedPropertyServices GetServices(DbContext context)

@@ -18,9 +18,6 @@ public sealed class SampleDbContext : DbContext
             entity.Property(e => e.Email)
                 .IsEncrypted();
 
-            entity.Property(e => e.DateOfBirth)
-                .IsEncrypted();
-
             entity.Property(e => e.SecretNotes)
                 .IsEncrypted(options =>
                 {

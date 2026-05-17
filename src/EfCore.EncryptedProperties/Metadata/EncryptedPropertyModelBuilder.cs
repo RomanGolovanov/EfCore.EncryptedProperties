@@ -1,6 +1,5 @@
 using EfCore.EncryptedProperties.Configuration;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Metadata;
+    using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace EfCore.EncryptedProperties.Metadata;
 
@@ -42,11 +41,26 @@ internal static class EncryptedPropertyModelBuilder
                     CiphertextPropertyName = property.Name,
                     ClrType = innerType,
                     Purpose = purpose,
-                    Mode = mode
+                    Mode = mode,
+                    Context = new EncryptedPropertyContext
+                    {
+                        Purpose = purpose,
+                        EntityTypeName = entityType.ClrType.FullName!,
+                        PropertyName = propertyName
+                    },
+                    DefaultValue = GetDefaultValue(innerType),
+                    Accessors = EncryptedPropertyAccessors.Create(entityType.ClrType, propertyName, mode)
                 });
             }
         }
 
         return new EncryptedPropertyModel(descriptors);
+    }
+
+    private static object? GetDefaultValue(Type type)
+    {
+        return type.IsValueType && Nullable.GetUnderlyingType(type) is null
+            ? Activator.CreateInstance(type)
+            : null;
     }
 }

@@ -53,7 +53,7 @@ services.AddDbContext<AppDbContext>((sp, options) =>
 });
 ```
 
-If you use the database key chain, add its table to your model:
+If you use the database key chain, add its table to your model. Mark encrypted properties with the fluent API:
 
 ```csharp
 protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -66,6 +66,23 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
         entity.Property(e => e.Email).IsEncrypted();
         entity.Property(e => e.SecretNotes).IsEncrypted(opts => opts.KeyPurpose = "notes");
     });
+}
+```
+
+Or use the `[Encrypted]` data annotation on the entity:
+
+```csharp
+using EfCore.EncryptedProperties;
+
+public sealed class Customer
+{
+    public Guid Id { get; set; }
+
+    [Encrypted("email")]
+    public string Email { get; set; } = string.Empty;
+
+    [Encrypted(KeyPurpose = "notes")]
+    public EncryptedValue<string> SecretNotes { get; set; } = default!;
 }
 ```
 
