@@ -28,7 +28,7 @@ dotnet add package EfCore.EncryptedProperties
 ```
 
 ```xml
-<PackageReference Include="EfCore.EncryptedProperties" Version="1.0.0" />
+<PackageReference Include="EfCore.EncryptedProperties" Version="1.0.1" />
 ```
 
 ## Quick Start
