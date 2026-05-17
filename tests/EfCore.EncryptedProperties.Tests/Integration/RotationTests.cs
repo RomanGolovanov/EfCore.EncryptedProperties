@@ -1,7 +1,10 @@
 using System.Security.Cryptography;
 using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Extensions;
+using EfCore.EncryptedProperties.KeyManagement;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace EfCore.EncryptedProperties.Tests.Integration;
@@ -82,6 +85,88 @@ public class RotationTests
         Assert.Single(records, r => r.Purpose == "default" && r.IsActive);
     }
 
+    [Fact]
+    public async Task FileKeyRing_RsaRotation_OldAndNewRowsDecryptable()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var dbName = Guid.NewGuid().ToString();
+            var dbRoot = new InMemoryDatabaseRoot();
+            var storage = new InMemoryKeyChainStorage();
+            var v1Path = Path.Combine(tempDir, "rsa-v1.pem");
+            var v2Path = Path.Combine(tempDir, "rsa-v2.pem");
+            var id1 = Guid.NewGuid();
+            var id2 = Guid.NewGuid();
+
+            await using (var provider = CreateFileKeyRingProvider(
+                dbName,
+                dbRoot,
+                storage,
+                "rsa-v1",
+                ("rsa-v1", v1Path)))
+            {
+                await using var scope = provider.CreateAsyncScope();
+                var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+                ctx.Customers.Add(new CustomerDecryptOnRead
+                {
+                    Id = id1,
+                    Email = "first@example.com",
+                    Name = "First"
+                });
+                await ctx.SaveChangesAsync();
+            }
+
+            await Task.Delay(10);
+
+            await using (var provider = CreateFileKeyRingProvider(
+                dbName,
+                dbRoot,
+                storage,
+                "rsa-v2",
+                ("rsa-v1", v1Path),
+                ("rsa-v2", v2Path)))
+            {
+                await using var scope = provider.CreateAsyncScope();
+                var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+                ctx.Customers.Add(new CustomerDecryptOnRead
+                {
+                    Id = id2,
+                    Email = "second@example.com",
+                    Name = "Second"
+                });
+                await ctx.SaveChangesAsync();
+            }
+
+            await using (var provider = CreateFileKeyRingProvider(
+                dbName,
+                dbRoot,
+                storage,
+                "rsa-v2",
+                ("rsa-v1", v1Path),
+                ("rsa-v2", v2Path)))
+            {
+                await using var scope = provider.CreateAsyncScope();
+                var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+                var c1 = await ctx.Customers.FindAsync(id1);
+                var c2 = await ctx.Customers.FindAsync(id2);
+
+                Assert.Equal("first@example.com", c1!.Email);
+                Assert.Equal("second@example.com", c2!.Email);
+            }
+
+            var records = await storage.GetAllAsync();
+            Assert.Contains(records, r => r.RsaKeyId == "rsa-v1");
+            Assert.Contains(records, r => r.RsaKeyId == "rsa-v2");
+            Assert.Single(records, r => r.IsActive && r.RsaKeyId == "rsa-v2");
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
     private static ServiceProvider CreateProvider(
         RSA rsa,
         Action<EncryptedPropertiesServiceBuilder>? configure = null)
@@ -97,6 +182,37 @@ public class RotationTests
         services.AddDbContext<TestDbContext>((sp, builder) =>
         {
             builder.UseInMemoryDatabase(dbName);
+            builder.UseEncryptedProperties(sp);
+        });
+        return services.BuildServiceProvider();
+    }
+
+    private static ServiceProvider CreateFileKeyRingProvider(
+        string dbName,
+        InMemoryDatabaseRoot dbRoot,
+        IKeyChainStorage storage,
+        string currentKeyId,
+        params (string KeyId, string Path)[] keys)
+    {
+        var services = new ServiceCollection();
+        services.AddEncryptedProperties(cfg =>
+        {
+            cfg.WithFileRsaKeyRingProvider(options =>
+            {
+                options.CurrentKeyId = currentKeyId;
+                foreach (var key in keys)
+                    options.AddKey(key.KeyId, key.Path);
+            });
+            cfg.WithInMemoryKeyChain();
+            cfg.WithKekCacheLifetime(TimeSpan.Zero);
+            cfg.WithKeyChainRotation(p => p.KeyRotateAfter = TimeSpan.Zero);
+        });
+        services.AddSingleton(storage);
+        services.AddDbContext<TestDbContext>((sp, builder) =>
+        {
+            builder.UseInMemoryDatabase(dbName, dbRoot);
+            builder.ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
             builder.UseEncryptedProperties(sp);
         });
         return services.BuildServiceProvider();

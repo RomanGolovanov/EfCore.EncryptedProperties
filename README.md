@@ -156,11 +156,17 @@ In-memory keys are lost when the process exits. They are for tests, demos, and s
 
 ```csharp
 services.AddEncryptedProperties(cfg => cfg
-    .WithFileRsaKeyProvider("keys/rsa-key.pem", "rsa-v1")
+    .WithFileRsaKeyRingProvider(options =>
+    {
+        options.CurrentKeyId = "rsa-v1";
+        options.AddKey("rsa-v1", "keys/rsa-v1.pem");
+    })
     .WithDatabaseKeyChain(SqlClientFactory.Instance, connectionString));
 ```
 
-The file provider creates the PEM file if it does not exist. Back it up and protect it like any other application secret.
+The file key-ring provider creates the current PEM file if it does not exist. Back it up and protect it like any other application secret. Historical key files must already exist, so a missing old key fails fast instead of silently creating a replacement that cannot decrypt existing records.
+
+For simple single-key deployments, `WithFileRsaKeyProvider("keys/rsa-key.pem", "rsa-v1")` is still available.
 
 ### OS Certificate Store
 
@@ -198,7 +204,12 @@ Keep old Key Vault key versions enabled and recoverable while any KEKs wrapped b
 
 ```csharp
 services.AddEncryptedProperties(cfg => cfg
-    .WithFileRsaKeyProvider("rsa-key.pem", "rsa-v1")
+    .WithFileRsaKeyRingProvider(options =>
+    {
+        options.CurrentKeyId = "rsa-v2";
+        options.AddKey("rsa-v1", "keys/rsa-v1.pem");
+        options.AddKey("rsa-v2", "keys/rsa-v2.pem");
+    })
     .WithDatabaseKeyChain(SqlClientFactory.Instance, connectionString)
     .WithKeyChainRotation(policy =>
     {
@@ -206,7 +217,7 @@ services.AddEncryptedProperties(cfg => cfg
     }));
 ```
 
-New writes use the current active key for the property's purpose. Existing rows remain readable after rotation.
+New writes use the current active KEK for the property's purpose. When key-chain rotation creates a new KEK, it is wrapped with the key ring's `CurrentKeyId`; existing KEKs remain readable through their stored RSA key IDs.
 
 ### Startup KEK Preload
 
@@ -257,6 +268,8 @@ The key-chain table enforces one active KEK per purpose with a filtered unique i
 ### Keys
 
 Keep the RSA key stable. If the file key is deleted, replaced, or a different Key Vault key is configured, previously stored key-chain records may no longer unwrap.
+
+For local RSA master-key rotation, use `WithFileRsaKeyRingProvider`, add the new PEM file under a new key ID, set `CurrentKeyId` to that new ID, and keep older `AddKey` entries while any `EncryptedPropertyKeks.RsaKeyId` values still reference them.
 
 For the OS certificate store provider, rotate RSA wrapping keys by provisioning a new certificate with a private key, deploying its thumbprint as `CurrentCertificateThumbprint`, and allowing KEK rotation to create new active KEKs. Keep previous certificates available for decrypt and startup preload until no `EncryptedPropertyKeks.RsaKeyId` values reference their thumbprints.
 

@@ -110,6 +110,19 @@ public sealed class EncryptedPropertiesServiceBuilder
         return this;
     }
 
+    public EncryptedPropertiesServiceBuilder WithFileRsaKeyRingProvider(
+        Action<FileRsaKeyRingProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new FileRsaKeyRingProviderOptions();
+        configure(options);
+
+        ReplaceSingleton<IRsaKeyProvider>(new FileRsaKeyRingProvider(options));
+        _rsaKeyProviderConfigured = true;
+        return this;
+    }
+
     public EncryptedPropertiesServiceBuilder WithAzureKeyVaultRsaKeyProvider(
         Uri keyVaultKeyUri,
         TokenCredential credential)
@@ -181,7 +194,7 @@ public sealed class EncryptedPropertiesServiceBuilder
     {
         if (!_rsaKeyProviderConfigured)
             throw new InvalidOperationException(
-                "An RSA key provider must be configured via WithInMemoryRsaKeyProvider, WithFileRsaKeyProvider, WithAzureKeyVaultRsaKeyProvider, or WithX509StoreRsaKeyProvider.");
+                "An RSA key provider must be configured via WithInMemoryRsaKeyProvider, WithFileRsaKeyProvider, WithFileRsaKeyRingProvider, WithAzureKeyVaultRsaKeyProvider, or WithX509StoreRsaKeyProvider.");
 
         if (!_keyChainStorageConfigured)
             throw new InvalidOperationException(

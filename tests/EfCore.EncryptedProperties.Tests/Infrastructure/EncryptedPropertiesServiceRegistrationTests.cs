@@ -143,6 +143,36 @@ public class EncryptedPropertiesServiceRegistrationTests
     }
 
     [Fact]
+    public void WithFileRsaKeyRingProvider_RegistersProvider()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var currentPath = Path.Combine(tempDir, "rsa-v1.pem");
+            var services = new ServiceCollection();
+            services.AddEncryptedProperties(cfg =>
+            {
+                cfg.WithFileRsaKeyRingProvider(options =>
+                {
+                    options.CurrentKeyId = "rsa-v1";
+                    options.AddKey("rsa-v1", currentPath);
+                });
+                cfg.WithInMemoryKeyChain();
+            });
+
+            using var provider = services.BuildServiceProvider();
+
+            Assert.IsType<FileRsaKeyRingProvider>(
+                provider.GetRequiredService<IRsaKeyProvider>());
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void WithDatabaseKeyChain_MissingConnectionString_Throws()
     {
         var services = new ServiceCollection();
