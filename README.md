@@ -1,10 +1,10 @@
 # EfCore.EncryptedProperties
 
-Property-level encryption for Entity Framework Core 9. Mark the properties that should be protected, configure where keys live, and keep using your entities in a normal EF workflow.
+Property-level encryption for Entity Framework Core 8, 9, and 10. Mark the properties that should be protected, configure where keys live, and keep using your entities in a normal EF workflow.
 
 `EfCore.EncryptedProperties` is aimed at applications that need more than a value converter wrapped around a single AES key. It encrypts individual EF properties before they reach database storage, uses authenticated encryption for the stored payload, and includes a key-chain layer for creating, wrapping, storing, rotating, caching, and preloading data keys.
 
-- **Targets:** .NET 9, EF Core 9
+- **Targets:** .NET 8/9/10 with matching EF Core 8/9/10 dependency groups
 - **Use it for:** PII, notes, tokens, small secrets, and values the database should never see in plaintext
 - **Entity experience:** normal CLR properties for transparent reads, or `EncryptedValue<T>` when you want explicit async decryption
 - **Crypto shape:** AES-256-GCM payload encryption, a fresh content-encryption key per encrypted value, AES-GCM key wrapping, and RSA-wrapped key-encryption keys
