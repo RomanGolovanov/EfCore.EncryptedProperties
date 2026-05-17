@@ -1,17 +1,30 @@
-using System.Security.Cryptography;
+using Azure.Identity;
 using EfCore.EncryptedProperties.Extensions;
-using EfCore.EncryptedProperties.Samples;
+using EfCore.EncryptedProperties.Samples.AzureKeyVault;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-var rsa = RSA.Create(2048);
+var configuration = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory)
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+    .AddUserSecrets<Program>(optional: true, reloadOnChange: false)
+    .Build();
+
+var keyVaultKeyUri = new Uri(GetRequiredSetting(configuration, "AzureKeyVault:KeyUri"));
+var credential = new ClientSecretCredential(
+    tenantId: GetRequiredSetting(configuration, "AzureKeyVault:TenantId"),
+    clientId: GetRequiredSetting(configuration, "AzureKeyVault:ClientId"),
+    clientSecret: GetRequiredSetting(configuration, "AzureKeyVault:ClientSecret"));
 
 var services = new ServiceCollection();
+
 services.AddEncryptedProperties(cfg =>
 {
-    cfg.WithInMemoryRsaKeyProvider(rsa, "sample-rsa-v1");
+    cfg.WithAzureKeyVaultRsaKeyProvider(keyVaultKeyUri, credential);
     cfg.WithInMemoryKeyChain();
 });
+
 services.AddDbContext<SampleDbContext>((sp, options) =>
 {
     options.UseInMemoryDatabase("SampleDb");
@@ -85,4 +98,13 @@ await using (var scope = serviceProvider.CreateAsyncScope())
     Console.WriteLine($"Updated SecretNotes: {notes}");
     var points = await customer.LoyaltyPoints.GetDecryptedValueAsync();
     Console.WriteLine($"Updated LoyaltyPoints: {points}");
+}
+
+static string GetRequiredSetting(IConfiguration configuration, string key)
+{
+    var value = configuration[key];
+    if (string.IsNullOrWhiteSpace(value))
+        throw new InvalidOperationException($"Required configuration value '{key}' is missing.");
+
+    return value;
 }

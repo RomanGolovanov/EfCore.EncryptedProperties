@@ -1,9 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <RootNamespace>EfCore.EncryptedProperties.Samples</RootNamespace>
+    <RootNamespace>EfCore.EncryptedProperties.Samples.InMemory</RootNamespace>
     <IsPackable>false</IsPackable>
+    <UserSecretsId>add812a8-1d05-4e69-8006-b93c53aa5f75</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,7 +1,7 @@
 using EfCore.EncryptedProperties.Extensions;
 using Microsoft.EntityFrameworkCore;
 
-namespace EfCore.EncryptedProperties.Samples;
+namespace EfCore.EncryptedProperties.Samples.InMemory;
 
 public sealed class SampleDbContext : DbContext
 {

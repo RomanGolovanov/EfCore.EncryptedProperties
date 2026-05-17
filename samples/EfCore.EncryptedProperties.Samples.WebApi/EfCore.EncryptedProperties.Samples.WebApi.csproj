@@ -1,8 +1,9 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <RootNamespace>EfCore.EncryptedProperties.ApiSample</RootNamespace>
+    <RootNamespace>EfCore.EncryptedProperties.Samples.WebApi</RootNamespace>
     <IsPackable>false</IsPackable>
+    <UserSecretsId>63780009-a922-476f-ae9e-efc4ae698acc</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
