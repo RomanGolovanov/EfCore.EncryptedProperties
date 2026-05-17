@@ -257,8 +257,9 @@ This protects data from being stored in plaintext in the database. It does not h
 
 ## Samples
 
-- [`samples/EfCore.EncryptedProperties.Samples`](samples/EfCore.EncryptedProperties.Samples) - console app showing both entity styles against EF InMemory.
-- [`samples/EfCore.EncryptedProperties.ApiSample`](samples/EfCore.EncryptedProperties.ApiSample) - minimal ASP.NET Core API using file-backed RSA and a SQL Server database key chain.
+- [`samples/EfCore.EncryptedProperties.Samples.InMemory`](samples/EfCore.EncryptedProperties.Samples.InMemory) - console app showing both entity styles against EF InMemory.
+- [`samples/EfCore.EncryptedProperties.Samples.AzureKeyVault`](samples/EfCore.EncryptedProperties.Samples.AzureKeyVault) - console app showing Azure KeyVault backed master key configuration.
+- [`samples/EfCore.EncryptedProperties.Samples.WebApi`](samples/EfCore.EncryptedProperties.Samples.WebApi) - minimal ASP.NET Core API using file-backed RSA and a SQL Server database key chain.
 
 ## License
 
