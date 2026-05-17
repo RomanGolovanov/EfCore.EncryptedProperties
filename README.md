@@ -2,9 +2,24 @@
 
 Property-level encryption for Entity Framework Core 9. Mark the properties that should be protected, configure where keys live, and keep using your entities in a normal EF workflow.
 
+`EfCore.EncryptedProperties` is aimed at applications that need more than a value converter wrapped around a single AES key. It encrypts individual EF properties before they reach database storage, uses authenticated encryption for the stored payload, and includes a key-chain layer for creating, wrapping, storing, rotating, caching, and preloading data keys.
+
 - **Targets:** .NET 9, EF Core 9
 - **Use it for:** PII, notes, tokens, small secrets, and values the database should never see in plaintext
 - **Entity experience:** normal CLR properties for transparent reads, or `EncryptedValue<T>` when you want explicit async decryption
+- **Crypto shape:** AES-256-GCM payload encryption, a fresh content-encryption key per encrypted value, AES-GCM key wrapping, and RSA-wrapped key-encryption keys
+- **Key management:** file, in-memory, and Azure Key Vault RSA providers, plus in-memory or database-backed key-chain storage
+
+## Why This Package
+
+Many EF Core encryption approaches stop at the first step: convert a property to ciphertext on save and back to plaintext on read. This package also handles the parts that usually become application-specific security plumbing:
+
+- **Envelope encryption out of the box.** Each encrypted value gets its own content-encryption key. Content keys are wrapped by per-purpose key-encryption keys, and key-encryption keys are wrapped by an RSA provider.
+- **Key purposes and rotation.** Use separate key chains for different data classes, such as `email`, `notes`, or `tokens`, and rotate new writes without losing access to old rows.
+- **Production master key locations.** Keep the RSA wrapping key in a PEM file for self-hosted apps, in Azure Key Vault when the private key should stay outside the host, or in memory for tests and demos.
+- **Database-backed key chain.** Store wrapped key records beside the application database, with one active key per purpose.
+- **Two entity styles.** Use ordinary CLR properties when transparency matters, or `EncryptedValue<T>` when you want decryption to be explicit and async at the call site.
+- **Typed values, not only strings.** Supported values include primitives, `string`, `byte[]`, `DateTime`, `DateTimeOffset`, `Guid`, enums, and nullable variants.
 
 ## Install
 
