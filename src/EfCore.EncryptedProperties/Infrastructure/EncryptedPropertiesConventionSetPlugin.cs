@@ -1,5 +1,6 @@
 using System.Reflection;
 using EfCore.EncryptedProperties.Configuration;
+using EfCore.EncryptedProperties.Metadata;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -46,7 +47,7 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
     {
         foreach (var entityType in modelBuilder.Metadata.GetEntityTypes().ToList())
         {
-            if (entityType.ClrType is null || IsEncryptedValueType(entityType.ClrType))
+            if (entityType.ClrType is null || EncryptedPropertyTypeSupport.IsEncryptedValueType(entityType.ClrType))
                 continue;
 
             foreach (var propertyInfo in entityType.ClrType.GetProperties(
@@ -91,7 +92,7 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
     {
         foreach (var entityType in modelBuilder.Metadata.GetEntityTypes().ToList())
         {
-            if (!IsEncryptedValueType(entityType.ClrType))
+            if (!EncryptedPropertyTypeSupport.IsEncryptedValueType(entityType.ClrType))
                 continue;
 
             if (entityType.GetForeignKeys().Any() || entityType.GetReferencingForeignKeys().Any())
@@ -136,9 +137,11 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
         }
 
         var plaintextPropertyName = plaintextProperty.Name;
+        var materialization = GetConfiguredMaterializationMode(entityType, plaintextProperty);
+        ValidateEncryptedProperty(entityType, plaintextProperty, materialization);
+
         var ciphertextPropertyName = GetCiphertextPropertyName(entityType, plaintextPropertyName);
         var purpose = plaintextProperty.FindAnnotation(EncryptedPropertyAnnotations.KeyPurpose)?.Value as string ?? "default";
-        var materialization = plaintextProperty.FindAnnotation(EncryptedPropertyAnnotations.Materialization)?.Value as string;
         var columnName = plaintextProperty.GetColumnName() ?? plaintextPropertyName;
         var columnType = plaintextProperty.GetColumnType();
         var maxLength = plaintextProperty.GetMaxLength();
@@ -165,7 +168,7 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
         ciphertextPropertyBuilder.HasAnnotation(EncryptedPropertyAnnotations.KeyPurpose, purpose, fromDataAnnotation: false);
         ciphertextPropertyBuilder.HasAnnotation(
             EncryptedPropertyAnnotations.Materialization,
-            materialization ?? GetMaterializationMode(plaintextProperty.ClrType),
+            materialization,
             fromDataAnnotation: false);
 
         ciphertextPropertyBuilder.HasColumnName(columnName, fromDataAnnotation: false);
@@ -202,13 +205,79 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
 
     private static string GetMaterializationMode(Type clrType)
     {
-        return IsEncryptedValueType(clrType)
-            ? "Lazy"
-            : "DecryptOnRead";
+        return EncryptedPropertyTypeSupport.IsEncryptedValueType(clrType)
+            ? EncryptedPropertyTypeSupport.LazyMaterialization
+            : EncryptedPropertyTypeSupport.DecryptOnReadMaterialization;
     }
 
-    private static bool IsEncryptedValueType(Type type)
+    private static string GetConfiguredMaterializationMode(IConventionEntityType entityType, IConventionProperty property)
     {
-        return type.IsGenericType && type.GetGenericTypeDefinition() == typeof(EncryptedValue<>);
+        var materialization = property.FindAnnotation(EncryptedPropertyAnnotations.Materialization)?.Value as string
+            ?? GetMaterializationMode(property.ClrType);
+
+        if (string.Equals(
+                materialization,
+                EncryptedPropertyTypeSupport.LazyMaterialization,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return EncryptedPropertyTypeSupport.LazyMaterialization;
+        }
+
+        if (string.Equals(
+                materialization,
+                EncryptedPropertyTypeSupport.DecryptOnReadMaterialization,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return EncryptedPropertyTypeSupport.DecryptOnReadMaterialization;
+        }
+
+        throw new InvalidOperationException(
+            $"Encrypted property '{GetPropertyDisplayName(entityType, property)}' has invalid materialization mode '{materialization}'. Supported modes are '{EncryptedPropertyTypeSupport.DecryptOnReadMaterialization}' and '{EncryptedPropertyTypeSupport.LazyMaterialization}'.");
+    }
+
+    private static void ValidateEncryptedProperty(
+        IConventionEntityType entityType,
+        IConventionProperty property,
+        string materialization)
+    {
+        var isEncryptedValue = EncryptedPropertyTypeSupport.IsEncryptedValueType(property.ClrType);
+        Type plaintextType;
+
+        if (materialization == EncryptedPropertyTypeSupport.LazyMaterialization)
+        {
+            if (!isEncryptedValue)
+            {
+                throw new InvalidOperationException(
+                    $"Encrypted property '{GetPropertyDisplayName(entityType, property)}' is configured for lazy materialization but CLR type '{GetTypeDisplayName(property.ClrType)}' must be EncryptedValue<T>.");
+            }
+
+            plaintextType = property.ClrType.GetGenericArguments()[0];
+        }
+        else
+        {
+            if (isEncryptedValue)
+            {
+                throw new InvalidOperationException(
+                    $"Encrypted property '{GetPropertyDisplayName(entityType, property)}' uses EncryptedValue<T> and must be configured for lazy materialization.");
+            }
+
+            plaintextType = property.ClrType;
+        }
+
+        if (!EncryptedPropertyTypeSupport.IsSupportedPlaintextType(plaintextType))
+        {
+            throw new InvalidOperationException(
+                $"Encrypted property '{GetPropertyDisplayName(entityType, property)}' has unsupported CLR type '{GetTypeDisplayName(plaintextType)}'. Supported encrypted property types are {EncryptedPropertyTypeSupport.SupportedTypesDescription}.");
+        }
+    }
+
+    private static string GetPropertyDisplayName(IConventionEntityType entityType, IConventionProperty property)
+    {
+        return $"{entityType.ClrType.FullName}.{property.Name}";
+    }
+
+    private static string GetTypeDisplayName(Type type)
+    {
+        return type.FullName ?? type.Name;
     }
 }

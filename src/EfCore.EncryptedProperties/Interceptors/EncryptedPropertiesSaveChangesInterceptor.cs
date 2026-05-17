@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Configuration;
 using EfCore.EncryptedProperties.Infrastructure;
@@ -15,11 +14,14 @@ namespace EfCore.EncryptedProperties.Interceptors;
 internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInterceptor
 {
     private readonly IEncryptedPropertyCryptor _cryptor;
-    private readonly ConcurrentDictionary<IModel, EncryptedPropertyModel> _models = new();
+    private readonly EncryptedPropertyModelCache _modelCache;
 
-    public EncryptedPropertiesSaveChangesInterceptor(IEncryptedPropertyCryptor cryptor)
+    public EncryptedPropertiesSaveChangesInterceptor(
+        IEncryptedPropertyCryptor cryptor,
+        EncryptedPropertyModelCache? modelCache = null)
     {
         _cryptor = cryptor;
+        _modelCache = modelCache ?? new EncryptedPropertyModelCache();
     }
 
     public override InterceptionResult<int> SavingChanges(
@@ -369,7 +371,7 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
 
     private EncryptedPropertyModel GetModel(DbContext context)
     {
-        return _models.GetOrAdd(context.Model, EncryptedPropertyModelBuilder.Build);
+        return _modelCache.GetOrAdd(context.Model);
     }
 
     private readonly record struct EncryptedPropertyServices(

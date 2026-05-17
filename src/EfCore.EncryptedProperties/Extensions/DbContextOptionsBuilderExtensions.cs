@@ -16,8 +16,8 @@ public static class DbContextOptionsBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(serviceProvider);
 
-        var cryptor = serviceProvider.GetRequiredService<IEncryptedPropertyCryptor>();
-        var extension = new EncryptedPropertiesDbContextOptionsExtension(cryptor);
+        _ = serviceProvider.GetRequiredService<IEncryptedPropertyCryptor>();
+        var extension = new EncryptedPropertiesDbContextOptionsExtension();
         ((IDbContextOptionsBuilderInfrastructure)builder).AddOrUpdateExtension(extension);
 
         builder.AddInterceptors(

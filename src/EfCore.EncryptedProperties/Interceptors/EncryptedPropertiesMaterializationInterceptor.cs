@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Infrastructure;
 using EfCore.EncryptedProperties.Metadata;
@@ -13,11 +12,14 @@ namespace EfCore.EncryptedProperties.Interceptors;
 internal sealed class EncryptedPropertiesMaterializationInterceptor : IMaterializationInterceptor
 {
     private readonly IEncryptedPropertyCryptor _cryptor;
-    private readonly ConcurrentDictionary<IModel, EncryptedPropertyModel> _models = new();
+    private readonly EncryptedPropertyModelCache _modelCache;
 
-    public EncryptedPropertiesMaterializationInterceptor(IEncryptedPropertyCryptor cryptor)
+    public EncryptedPropertiesMaterializationInterceptor(
+        IEncryptedPropertyCryptor cryptor,
+        EncryptedPropertyModelCache? modelCache = null)
     {
         _cryptor = cryptor;
+        _modelCache = modelCache ?? new EncryptedPropertyModelCache();
     }
 
     public object InitializedInstance(MaterializationInterceptionData materializationData, object entity)
@@ -112,7 +114,7 @@ internal sealed class EncryptedPropertiesMaterializationInterceptor : IMateriali
 
     private EncryptedPropertyModel GetModel(DbContext context)
     {
-        return _models.GetOrAdd(context.Model, EncryptedPropertyModelBuilder.Build);
+        return _modelCache.GetOrAdd(context.Model);
     }
 
     private readonly record struct EncryptedPropertyServices(

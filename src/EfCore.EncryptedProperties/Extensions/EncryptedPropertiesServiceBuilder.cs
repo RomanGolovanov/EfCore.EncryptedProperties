@@ -7,6 +7,7 @@ using EfCore.EncryptedProperties.Cryptography;
 using EfCore.EncryptedProperties.Infrastructure;
 using EfCore.EncryptedProperties.Interceptors;
 using EfCore.EncryptedProperties.KeyManagement;
+using EfCore.EncryptedProperties.Metadata;
 using EfCore.EncryptedProperties.Providers;
 using EfCore.EncryptedProperties.Serialization;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,14 +36,17 @@ public static class EncryptedPropertiesServiceCollectionExtensions
         services.RemoveAll<IKeyChainManager>();
         services.RemoveAll<IEncryptedPropertyCryptor>();
         services.RemoveAll<EncryptedPropertyStateTracker>();
+        services.RemoveAll<EncryptedPropertyModelCache>();
         services.RemoveAll<EncryptedPropertiesSaveChangesInterceptor>();
         services.RemoveAll<EncryptedPropertiesMaterializationInterceptor>();
 
+        services.AddLogging();
         services.AddSingleton(options);
         services.AddSingleton<IValueSerializer, ValueSerializer>();
         services.AddSingleton<IKeyChainManager, KeyChainManager>();
         services.AddSingleton<IEncryptedPropertyCryptor, EncryptedPropertyCryptor>();
         services.AddScoped<EncryptedPropertyStateTracker>();
+        services.AddSingleton<EncryptedPropertyModelCache>();
         services.AddSingleton<EncryptedPropertiesSaveChangesInterceptor>();
         services.AddSingleton<EncryptedPropertiesMaterializationInterceptor>();
 

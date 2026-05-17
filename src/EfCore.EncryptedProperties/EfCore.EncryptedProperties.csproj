@@ -32,6 +32,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.16" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.16" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.16" />
     <PackageReference Include="Azure.Security.KeyVault.Keys" Version="4.8.0" />
     <PackageReference Include="Azure.Identity" Version="1.17.1" />
