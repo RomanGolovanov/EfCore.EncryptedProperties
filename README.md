@@ -8,7 +8,7 @@ Property-level encryption for Entity Framework Core 8, 9, and 10. Mark the prope
 - **Use it for:** PII, notes, tokens, small secrets, and values the database should never see in plaintext
 - **Entity experience:** normal CLR properties for transparent reads, or `EncryptedValue<T>` when you want explicit async decryption
 - **Crypto shape:** AES-256-GCM payload encryption, a fresh content-encryption key per encrypted value, AES-GCM key wrapping, and RSA-wrapped key-encryption keys
-- **Key management:** file, in-memory, and Azure Key Vault RSA providers, plus in-memory or database-backed key-chain storage
+- **Key management:** file, OS certificate store, in-memory, and Azure Key Vault RSA providers, plus in-memory or database-backed key-chain storage
 
 ## Why This Package
 
@@ -16,7 +16,7 @@ Many EF Core encryption approaches stop at the first step: convert a property to
 
 - **Envelope encryption out of the box.** Each encrypted value gets its own content-encryption key. Content keys are wrapped by per-purpose key-encryption keys, and key-encryption keys are wrapped by an RSA provider.
 - **Key purposes and rotation.** Use separate key chains for different data classes, such as `email`, `notes`, or `tokens`, and rotate new writes without losing access to old rows.
-- **Production master key locations.** Keep the RSA wrapping key in a PEM file for self-hosted apps, in Azure Key Vault when the private key should stay outside the host, or in memory for tests and demos.
+- **Production master key locations.** Keep the RSA wrapping key in a PEM file, an OS certificate store, in Azure Key Vault when the private key should stay outside the host, or in memory for tests and demos.
 - **Database-backed key chain.** Store wrapped key records beside the application database, with one active key per purpose.
 - **Two entity styles.** Use ordinary CLR properties when transparency matters, or `EncryptedValue<T>` when you want decryption to be explicit and async at the call site.
 - **Typed values, not only strings.** Supported values include primitives, `string`, `byte[]`, `DateTime`, `DateTimeOffset`, `Guid`, enums, and nullable variants.
@@ -162,6 +162,24 @@ services.AddEncryptedProperties(cfg => cfg
 
 The file provider creates the PEM file if it does not exist. Back it up and protect it like any other application secret.
 
+### OS Certificate Store
+
+```csharp
+services.AddEncryptedProperties(cfg => cfg
+    .WithX509StoreRsaKeyProvider(options =>
+    {
+        options.CurrentCertificateThumbprint = "00112233445566778899AABBCCDDEEFF00112233";
+    })
+    .WithDatabaseKeyChain(SqlClientFactory.Instance, connectionString)
+    .WithKeyChainPreloadOnStartup());
+```
+
+By default, the provider reads from `CurrentUser\My`. New KEKs are wrapped with the configured current certificate thumbprint, and the stored KEK record keeps a self-describing RSA key ID such as `x509store:CurrentUser:My:{thumbprint}`. Historical KEKs unwrap by the stored thumbprint, so keep old certificates and their private keys in the store while any KEKs still reference them.
+
+For Windows services, `LocalMachine\My` can be used when the service identity has private-key access. Prefer CNG-backed RSA certificates; older CAPI keys may not support `RSA-OAEP-256`. On Linux, prefer `CurrentUser\My`; `LocalMachine\My` is not a portable place for private-key certificates in .NET. 
+
+The provider does not export private keys from store.
+
 ### Azure Key Vault
 
 ```csharp
@@ -239,6 +257,8 @@ The key-chain table enforces one active KEK per purpose with a filtered unique i
 ### Keys
 
 Keep the RSA key stable. If the file key is deleted, replaced, or a different Key Vault key is configured, previously stored key-chain records may no longer unwrap.
+
+For the OS certificate store provider, rotate RSA wrapping keys by provisioning a new certificate with a private key, deploying its thumbprint as `CurrentCertificateThumbprint`, and allowing KEK rotation to create new active KEKs. Keep previous certificates available for decrypt and startup preload until no `EncryptedPropertyKeks.RsaKeyId` values reference their thumbprints.
 
 The library rotates data-encryption keys, but it does not automatically rotate the RSA master key.
 

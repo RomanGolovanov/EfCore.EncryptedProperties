@@ -122,6 +122,19 @@ public sealed class EncryptedPropertiesServiceBuilder
         return this;
     }
 
+    public EncryptedPropertiesServiceBuilder WithX509StoreRsaKeyProvider(
+        Action<X509StoreRsaKeyProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new X509StoreRsaKeyProviderOptions();
+        configure(options);
+
+        ReplaceSingleton<IRsaKeyProvider>(new X509StoreRsaKeyProvider(options));
+        _rsaKeyProviderConfigured = true;
+        return this;
+    }
+
     public EncryptedPropertiesServiceBuilder WithInMemoryKeyChain()
     {
         ReplaceSingleton<IKeyChainStorage>(new InMemoryKeyChainStorage());
@@ -168,7 +181,7 @@ public sealed class EncryptedPropertiesServiceBuilder
     {
         if (!_rsaKeyProviderConfigured)
             throw new InvalidOperationException(
-                "An RSA key provider must be configured via WithInMemoryRsaKeyProvider, WithFileRsaKeyProvider, or WithAzureKeyVaultRsaKeyProvider.");
+                "An RSA key provider must be configured via WithInMemoryRsaKeyProvider, WithFileRsaKeyProvider, WithAzureKeyVaultRsaKeyProvider, or WithX509StoreRsaKeyProvider.");
 
         if (!_keyChainStorageConfigured)
             throw new InvalidOperationException(

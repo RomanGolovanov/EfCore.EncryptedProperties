@@ -4,6 +4,7 @@ using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Extensions;
 using EfCore.EncryptedProperties.Infrastructure;
 using EfCore.EncryptedProperties.KeyManagement;
+using EfCore.EncryptedProperties.Providers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -120,6 +121,25 @@ public class EncryptedPropertiesServiceRegistrationTests
         Assert.Contains(
             provider.GetServices<IHostedService>(),
             service => service is KeyChainPreloadHostedService);
+    }
+
+    [Fact]
+    public void WithX509StoreRsaKeyProvider_RegistersProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddEncryptedProperties(cfg =>
+        {
+            cfg.WithX509StoreRsaKeyProvider(options =>
+            {
+                options.CurrentCertificateThumbprint = "00112233445566778899AABBCCDDEEFF00112233";
+            });
+            cfg.WithInMemoryKeyChain();
+        });
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<X509StoreRsaKeyProvider>(
+            provider.GetRequiredService<IRsaKeyProvider>());
     }
 
     [Fact]
