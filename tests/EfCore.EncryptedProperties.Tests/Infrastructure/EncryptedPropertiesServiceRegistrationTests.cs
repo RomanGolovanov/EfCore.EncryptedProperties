@@ -173,6 +173,45 @@ public class EncryptedPropertiesServiceRegistrationTests
     }
 
     [Fact]
+    public void WithFileKeyChain_RegistersStorage()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddEncryptedProperties(cfg =>
+            {
+                cfg.WithInMemoryRsaKeyProvider(RSA.Create(2048), "rsa-v1");
+                cfg.WithFileKeyChain(tempDir);
+            });
+
+            using var provider = services.BuildServiceProvider();
+
+            Assert.IsType<FileKeyChainStorage>(
+                provider.GetRequiredService<IKeyChainStorage>());
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WithFileKeyChain_MissingDirectoryPath_Throws()
+    {
+        var services = new ServiceCollection();
+
+        Assert.Throws<ArgumentException>(() =>
+            services.AddEncryptedProperties(cfg =>
+            {
+                cfg.WithInMemoryRsaKeyProvider(RSA.Create(2048), "rsa-v1");
+                cfg.WithFileKeyChain(" ");
+            }));
+    }
+
+    [Fact]
     public void WithDatabaseKeyChain_MissingConnectionString_Throws()
     {
         var services = new ServiceCollection();

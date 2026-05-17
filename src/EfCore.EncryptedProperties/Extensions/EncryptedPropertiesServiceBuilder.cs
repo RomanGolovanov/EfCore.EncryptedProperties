@@ -155,6 +155,15 @@ public sealed class EncryptedPropertiesServiceBuilder
         return this;
     }
 
+    public EncryptedPropertiesServiceBuilder WithFileKeyChain(string directoryPath)
+    {
+        ThrowIfNullOrWhiteSpace(directoryPath);
+
+        ReplaceSingleton<IKeyChainStorage>(new FileKeyChainStorage(directoryPath));
+        _keyChainStorageConfigured = true;
+        return this;
+    }
+
     public EncryptedPropertiesServiceBuilder WithDatabaseKeyChain(
         DbProviderFactory providerFactory,
         string connectionString)
@@ -198,7 +207,7 @@ public sealed class EncryptedPropertiesServiceBuilder
 
         if (!_keyChainStorageConfigured)
             throw new InvalidOperationException(
-                "A key chain storage must be configured via WithInMemoryKeyChain or WithDatabaseKeyChain.");
+                "A key chain storage must be configured via WithInMemoryKeyChain, WithFileKeyChain, or WithDatabaseKeyChain.");
     }
 
     private void ReplaceSingleton<TService>(TService instance)

@@ -8,7 +8,7 @@ Property-level encryption for Entity Framework Core 8, 9, and 10. Mark the prope
 - **Use it for:** PII, notes, tokens, small secrets, and values the database should never see in plaintext
 - **Entity experience:** normal CLR properties for transparent reads, or `EncryptedValue<T>` when you want explicit async decryption
 - **Crypto shape:** AES-256-GCM payload encryption, a fresh content-encryption key per encrypted value, AES-GCM key wrapping, and RSA-wrapped key-encryption keys
-- **Key management:** file, OS certificate store, in-memory, and Azure Key Vault RSA providers, plus in-memory or database-backed key-chain storage
+- **Key management:** file, OS certificate store, in-memory, and Azure Key Vault RSA providers, plus in-memory, file-backed, or database-backed key-chain storage
 
 ## Why This Package
 
@@ -17,7 +17,7 @@ Many EF Core encryption approaches stop at the first step: convert a property to
 - **Envelope encryption out of the box.** Each encrypted value gets its own content-encryption key. Content keys are wrapped by per-purpose key-encryption keys, and key-encryption keys are wrapped by an RSA provider.
 - **Key purposes and rotation.** Use separate key chains for different data classes, such as `email`, `notes`, or `tokens`, and rotate new writes without losing access to old rows.
 - **Production master key locations.** Keep the RSA wrapping key in a PEM file, an OS certificate store, in Azure Key Vault when the private key should stay outside the host, or in memory for tests and demos.
-- **Database-backed key chain.** Store wrapped key records beside the application database, with one active key per purpose.
+- **Durable key chains.** Store wrapped key records in files or beside the application database, with one active key per purpose.
 - **Two entity styles.** Use ordinary CLR properties when transparency matters, or `EncryptedValue<T>` when you want decryption to be explicit and async at the call site.
 - **Typed values, not only strings.** Supported values include primitives, `string`, `byte[]`, `DateTime`, `DateTimeOffset`, `Guid`, enums, and nullable variants.
 
@@ -167,6 +167,16 @@ services.AddEncryptedProperties(cfg => cfg
 The file key-ring provider creates the current PEM file if it does not exist. Back it up and protect it like any other application secret. Historical key files must already exist, so a missing old key fails fast instead of silently creating a replacement that cannot decrypt existing records.
 
 For simple single-key deployments, `WithFileRsaKeyProvider("keys/rsa-key.pem", "rsa-v1")` is still available.
+
+### File-Backed Key Chain
+
+```csharp
+services.AddEncryptedProperties(cfg => cfg
+    .WithFileRsaKeyProvider("keys/rsa-key.pem", "rsa-v1")
+    .WithFileKeyChain("keys/key-chain"));
+```
+
+The file key chain stores wrapped KEK records as one JSON file per key purpose in the configured directory. Protect and back up this directory alongside the RSA private key; losing either the RSA key or the key-chain files can make existing encrypted data unreadable.
 
 ### OS Certificate Store
 
