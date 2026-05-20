@@ -6,6 +6,156 @@ namespace EfCore.EncryptedProperties.Tests.KeyManagement;
 public sealed class DatabaseKeyChainStorageTests
 {
     [Fact]
+    public async Task GetOrActivateAsync_PersistsActiveKey()
+    {
+        var database = CreateDatabase();
+
+        try
+        {
+            await CreateSchemaAsync(database.ConnectionString);
+            var storage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
+            var expected = CreateRecord("default", "wrapped");
+
+            await storage.GetOrActivateAsync("default", rotateBefore: null, expected);
+            var active = await storage.GetActiveAsync("default");
+
+            Assert.NotNull(active);
+            Assert.Equal(expected.Id, active.Id);
+            Assert.Equal(expected.EncryptedKey, active.EncryptedKey);
+        }
+        finally
+        {
+            DropDatabase(database);
+        }
+    }
+
+    [Fact]
+    public async Task GetOrActivateAsync_ReturnsExistingActiveKey_WhenRotationNotNeeded()
+    {
+        var database = CreateDatabase();
+
+        try
+        {
+            await CreateSchemaAsync(database.ConnectionString);
+            var storage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
+            var existing = CreateRecord("default", "existing");
+            var candidate = CreateRecord("default", "candidate");
+
+            await storage.GetOrActivateAsync("default", rotateBefore: null, existing);
+            var active = await storage.GetOrActivateAsync("default", rotateBefore: null, candidate);
+            var records = await storage.GetAllAsync();
+
+            Assert.Equal(existing.Id, active.Id);
+            Assert.DoesNotContain(records, record => record.Id == candidate.Id);
+            Assert.Single(records, record => record.Purpose == "default" && record.IsActive);
+        }
+        finally
+        {
+            DropDatabase(database);
+        }
+    }
+
+    [Fact]
+    public async Task GetOrActivateAsync_RetiresExpiredActiveKey()
+    {
+        var database = CreateDatabase();
+
+        try
+        {
+            await CreateSchemaAsync(database.ConnectionString);
+            var storage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
+            var oldRecord = CreateRecord("default", "old", DateTimeOffset.UtcNow.AddDays(-2));
+            var newRecord = CreateRecord("default", "new");
+
+            await storage.GetOrActivateAsync("default", rotateBefore: null, oldRecord);
+            var active = await storage.GetOrActivateAsync("default", DateTimeOffset.UtcNow.AddDays(-1), newRecord);
+            var records = await storage.GetAllAsync();
+
+            Assert.Equal(newRecord.Id, active.Id);
+            Assert.False(records.Single(record => record.Id == oldRecord.Id).IsActive);
+            Assert.True(records.Single(record => record.Id == newRecord.Id).IsActive);
+        }
+        finally
+        {
+            DropDatabase(database);
+        }
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_And_GetAllAsync_ReadAcrossPurposes()
+    {
+        var database = CreateDatabase();
+
+        try
+        {
+            await CreateSchemaAsync(database.ConnectionString);
+            var storage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
+            var emailRecord = CreateRecord("email", "email-key");
+            var notesRecord = CreateRecord("notes", "notes-key");
+
+            await storage.GetOrActivateAsync("email", rotateBefore: null, emailRecord);
+            await storage.GetOrActivateAsync("notes", rotateBefore: null, notesRecord);
+
+            var loaded = await storage.GetByIdAsync(notesRecord.Id.ToString());
+            var missing = await storage.GetByIdAsync("not-a-guid");
+            var all = await storage.GetAllAsync();
+
+            Assert.NotNull(loaded);
+            Assert.Equal(notesRecord.Id, loaded.Id);
+            Assert.Equal("notes", loaded.Purpose);
+            Assert.Null(missing);
+            Assert.Contains(all, record => record.Id == emailRecord.Id);
+            Assert.Contains(all, record => record.Id == notesRecord.Id);
+        }
+        finally
+        {
+            DropDatabase(database);
+        }
+    }
+
+    [Fact]
+    public async Task GetActiveAsync_MissingPurpose_ReturnsNull()
+    {
+        var database = CreateDatabase();
+
+        try
+        {
+            await CreateSchemaAsync(database.ConnectionString);
+            var storage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
+
+            var active = await storage.GetActiveAsync("missing");
+
+            Assert.Null(active);
+        }
+        finally
+        {
+            DropDatabase(database);
+        }
+    }
+
+    [Fact]
+    public async Task GetOrActivateAsync_InvalidCandidate_ThrowsBeforeWriting()
+    {
+        var database = CreateDatabase();
+
+        try
+        {
+            var storage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
+            var wrongPurpose = CreateRecord("actual", "wrapped");
+            var inactive = CreateRecord("default", "wrapped", isActive: false);
+
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                storage.GetOrActivateAsync("expected", rotateBefore: null, wrongPurpose).AsTask());
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                storage.GetOrActivateAsync("default", rotateBefore: null, inactive).AsTask());
+        }
+        finally
+        {
+            DropDatabase(database);
+        }
+    }
+
+    [Fact]
     public async Task GetOrActivateAsync_ConcurrentCallers_CreateSingleActiveKey()
     {
         var database = CreateDatabase();
@@ -36,7 +186,11 @@ public sealed class DatabaseKeyChainStorageTests
         }
     }
 
-    private static EncryptedKeyRecord CreateRecord(string purpose, string encryptedKey)
+    private static EncryptedKeyRecord CreateRecord(
+        string purpose,
+        string encryptedKey,
+        DateTimeOffset? createdAt = null,
+        bool isActive = true)
     {
         return new EncryptedKeyRecord
         {
@@ -45,8 +199,8 @@ public sealed class DatabaseKeyChainStorageTests
             RsaKeyId = "rsa-key",
             Algorithm = "A256GCMKW",
             EncryptedKey = encryptedKey,
-            CreatedAt = DateTimeOffset.UtcNow,
-            IsActive = true
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
+            IsActive = isActive
         };
     }
 

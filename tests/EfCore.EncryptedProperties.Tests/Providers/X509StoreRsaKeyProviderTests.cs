@@ -174,18 +174,39 @@ public sealed class X509StoreRsaKeyProviderTests : IDisposable
             notBefore ?? DateTimeOffset.UtcNow.AddMinutes(-5),
             notAfter ?? DateTimeOffset.UtcNow.AddDays(1));
 
-        var storeCertificate = includePrivateKey
-            ? X509CertificateLoader.LoadPkcs12(
-                certificate.Export(X509ContentType.Pfx, string.Empty),
-                string.Empty,
-                X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.PersistKeySet,
-                Pkcs12LoaderLimits.Defaults)
-            : X509CertificateLoader.LoadCertificate(certificate.Export(X509ContentType.Cert));
+        var storeCertificate = LoadStoreCertificate(certificate, includePrivateKey);
 
         AddToStore(storeCertificate);
         _createdCertificates.Add(storeCertificate);
         _thumbprints.Add(storeCertificate.Thumbprint!);
         return storeCertificate;
+    }
+
+    private static X509Certificate2 LoadStoreCertificate(
+        X509Certificate2 certificate,
+        bool includePrivateKey)
+    {
+        if (includePrivateKey)
+        {
+#if NET9_0_OR_GREATER
+            return X509CertificateLoader.LoadPkcs12(
+                certificate.Export(X509ContentType.Pfx, string.Empty),
+                string.Empty,
+                X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.PersistKeySet,
+                Pkcs12LoaderLimits.Defaults);
+#else
+            return new X509Certificate2(
+                certificate.Export(X509ContentType.Pfx, string.Empty),
+                string.Empty,
+                X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.PersistKeySet);
+#endif
+        }
+
+#if NET9_0_OR_GREATER
+        return X509CertificateLoader.LoadCertificate(certificate.Export(X509ContentType.Cert));
+#else
+        return new X509Certificate2(certificate.Export(X509ContentType.Cert));
+#endif
     }
 
     private static void AddToStore(X509Certificate2 certificate)
