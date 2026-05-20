@@ -9,6 +9,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/EfCore.EncryptedProperties.Samples.InMemory/EfCore.EncryptedProperties.Samples.InMemory.csproj" />
     <Project Path="samples/EfCore.EncryptedProperties.Samples.AzureKeyVault/EfCore.EncryptedProperties.Samples.AzureKeyVault.csproj" />
+    <Project Path="samples/EfCore.EncryptedProperties.Samples.AzuriteBlobs/EfCore.EncryptedProperties.Samples.AzuriteBlobs.csproj" />
     <Project Path="samples/EfCore.EncryptedProperties.Samples.WebApi/EfCore.EncryptedProperties.Samples.WebApi.csproj" />
   </Folder>
 </Solution>

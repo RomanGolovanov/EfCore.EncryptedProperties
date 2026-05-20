@@ -217,6 +217,13 @@ services.AddEncryptedProperties(cfg => cfg
 
 The Blob PEM key-ring provider can create the current PEM blob if it is missing; historical PEM blobs must already exist. `WithAzureBlobPfxRsaKeyRingProvider` is available for read-only PFX blobs. Blob key-chain storage uses optimistic ETag writes to keep one active KEK per purpose under concurrent callers.
 
+For a local Azurite-backed sample that stores both the RSA PEM key ring and key-chain JSON documents in blobs:
+
+```powershell
+docker run --rm -p 10000:10000 -p 10001:10001 -p 10002:10002 mcr.microsoft.com/azure-storage/azurite
+dotnet run --project samples/EfCore.EncryptedProperties.Samples.AzuriteBlobs
+```
+
 ### OS Certificate Store
 
 ```csharp
@@ -341,6 +348,7 @@ This protects data from being stored in plaintext in the database. It does not h
 
 - [`samples/EfCore.EncryptedProperties.Samples.InMemory`](samples/EfCore.EncryptedProperties.Samples.InMemory) - console app showing both entity styles against EF InMemory.
 - [`samples/EfCore.EncryptedProperties.Samples.AzureKeyVault`](samples/EfCore.EncryptedProperties.Samples.AzureKeyVault) - console app showing Azure KeyVault backed master key configuration.
+- [`samples/EfCore.EncryptedProperties.Samples.AzuriteBlobs`](samples/EfCore.EncryptedProperties.Samples.AzuriteBlobs) - console app showing Blob-backed RSA key ring and key-chain storage against local Azurite.
 - [`samples/EfCore.EncryptedProperties.Samples.WebApi`](samples/EfCore.EncryptedProperties.Samples.WebApi) - minimal ASP.NET Core API using file-backed RSA and a SQL Server database key chain.
 
 ## License
