@@ -7,6 +7,7 @@ using EfCore.EncryptedProperties.Extensions;
 using EfCore.EncryptedProperties.Infrastructure;
 using EfCore.EncryptedProperties.KeyManagement;
 using EfCore.EncryptedProperties.Providers;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -65,6 +66,40 @@ public class EncryptedPropertiesServiceRegistrationTests
         Assert.NotSame(
             scope1.ServiceProvider.GetRequiredService<EncryptedPropertyStateTracker>(),
             scope2.ServiceProvider.GetRequiredService<EncryptedPropertyStateTracker>());
+    }
+
+    [Fact]
+    public async Task UseEncryptedProperties_DoesNotCreateDistinctEfInternalServiceProvider_PerApplicationProvider()
+    {
+        for (var i = 0; i < 25; i++)
+        {
+            var rsaKeyId = $"rsa-v{i}";
+            var services = new ServiceCollection();
+            services.AddEncryptedProperties(cfg =>
+            {
+                cfg.WithInMemoryRsaKeyProvider(RSA.Create(2048), rsaKeyId);
+                cfg.WithInMemoryKeyChain();
+            });
+            services.AddDbContext<CacheWarningDbContext>((sp, options) =>
+            {
+                options.UseInMemoryDatabase(Guid.NewGuid().ToString());
+                options.UseEncryptedProperties(sp);
+            });
+
+            using var provider = services.BuildServiceProvider();
+            using var scope = provider.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<CacheWarningDbContext>();
+
+            context.Entities.Add(new CacheWarningEntity
+            {
+                Id = Guid.NewGuid(),
+                Secret = "classified"
+            });
+            await context.SaveChangesAsync();
+
+            var records = await provider.GetRequiredService<IKeyChainStorage>().GetAllAsync();
+            Assert.Contains(records, record => record.RsaKeyId == rsaKeyId);
+        }
     }
 
     [Fact]
@@ -367,6 +402,31 @@ public class EncryptedPropertiesServiceRegistrationTests
 
     private static BlobContainerClient CreateBlobContainerClient()
         => new(new Uri("https://account.blob.core.windows.net/encrypted-properties-tests"));
+
+    private sealed class CacheWarningDbContext : DbContext
+    {
+        public CacheWarningDbContext(DbContextOptions<CacheWarningDbContext> options)
+            : base(options)
+        {
+        }
+
+        public DbSet<CacheWarningEntity> Entities => Set<CacheWarningEntity>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<CacheWarningEntity>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Secret).IsEncrypted();
+            });
+        }
+    }
+
+    private sealed class CacheWarningEntity
+    {
+        public Guid Id { get; set; }
+        public string Secret { get; set; } = string.Empty;
+    }
 
     private static async Task CreatePfxAsync(string path, string password)
     {

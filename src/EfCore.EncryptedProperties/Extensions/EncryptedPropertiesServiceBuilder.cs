@@ -7,7 +7,6 @@ using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Configuration;
 using EfCore.EncryptedProperties.Cryptography;
 using EfCore.EncryptedProperties.Infrastructure;
-using EfCore.EncryptedProperties.Interceptors;
 using EfCore.EncryptedProperties.KeyManagement;
 using EfCore.EncryptedProperties.Metadata;
 using EfCore.EncryptedProperties.Providers;
@@ -39,8 +38,6 @@ public static class EncryptedPropertiesServiceCollectionExtensions
         services.RemoveAll<IEncryptedPropertyCryptor>();
         services.RemoveAll<EncryptedPropertyStateTracker>();
         services.RemoveAll<EncryptedPropertyModelCache>();
-        services.RemoveAll<EncryptedPropertiesSaveChangesInterceptor>();
-        services.RemoveAll<EncryptedPropertiesMaterializationInterceptor>();
 
         services.AddLogging();
         services.AddSingleton(options);
@@ -49,8 +46,6 @@ public static class EncryptedPropertiesServiceCollectionExtensions
         services.AddSingleton<IEncryptedPropertyCryptor, EncryptedPropertyCryptor>();
         services.AddScoped<EncryptedPropertyStateTracker>();
         services.AddSingleton<EncryptedPropertyModelCache>();
-        services.AddSingleton<EncryptedPropertiesSaveChangesInterceptor>();
-        services.AddSingleton<EncryptedPropertiesMaterializationInterceptor>();
 
         RemoveKeyChainPreloadHostedService(services);
         if (builder.PreloadOnStartup)

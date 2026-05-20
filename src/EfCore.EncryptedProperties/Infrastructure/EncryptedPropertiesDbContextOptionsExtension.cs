@@ -8,6 +8,13 @@ internal sealed class EncryptedPropertiesDbContextOptionsExtension : IDbContextO
 {
     private DbContextOptionsExtensionInfo? _info;
 
+    public EncryptedPropertiesDbContextOptionsExtension(IServiceProvider applicationServiceProvider)
+    {
+        ApplicationServiceProvider = applicationServiceProvider;
+    }
+
+    internal IServiceProvider ApplicationServiceProvider { get; }
+
     public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
 
     public void ApplyServices(IServiceCollection services)

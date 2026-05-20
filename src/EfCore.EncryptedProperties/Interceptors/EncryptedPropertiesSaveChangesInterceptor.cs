@@ -13,15 +13,10 @@ namespace EfCore.EncryptedProperties.Interceptors;
 
 internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInterceptor
 {
-    private readonly IEncryptedPropertyCryptor _cryptor;
-    private readonly EncryptedPropertyModelCache _modelCache;
+    internal static readonly EncryptedPropertiesSaveChangesInterceptor Instance = new();
 
-    public EncryptedPropertiesSaveChangesInterceptor(
-        IEncryptedPropertyCryptor cryptor,
-        EncryptedPropertyModelCache? modelCache = null)
+    private EncryptedPropertiesSaveChangesInterceptor()
     {
-        _cryptor = cryptor;
-        _modelCache = modelCache ?? new EncryptedPropertyModelCache();
     }
 
     public override InterceptionResult<int> SavingChanges(
@@ -51,11 +46,10 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
 
     private void ProcessSavingChanges(DbContext context, CancellationToken cancellationToken)
     {
-        var model = GetModel(context);
+        var services = GetServices(context);
+        var model = GetModel(context, services.ModelCache);
         if (model.Properties.Count == 0)
             return;
-
-        var services = GetServices(context);
 
         foreach (var entry in GetProcessableEntries(context))
         {
@@ -81,11 +75,10 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
 
     private async Task ProcessSavingChangesAsync(DbContext context, CancellationToken cancellationToken)
     {
-        var model = GetModel(context);
+        var services = GetServices(context);
+        var model = GetModel(context, services.ModelCache);
         if (model.Properties.Count == 0)
             return;
-
-        var services = GetServices(context);
 
         foreach (var entry in GetProcessableEntries(context))
         {
@@ -361,20 +354,36 @@ internal sealed class EncryptedPropertiesSaveChangesInterceptor : SaveChangesInt
                 $"Encrypted property '{descriptor.EntityTypeName}.{descriptor.PropertyName}' is not configured for lazy encrypted values.");
     }
 
-    private EncryptedPropertyServices GetServices(DbContext context)
+    private static EncryptedPropertyServices GetServices(DbContext context)
     {
-        var sp = ((IInfrastructure<IServiceProvider>)context).Instance;
+        var efServices = ((IInfrastructure<IServiceProvider>)context).Instance;
+        var applicationServices = GetApplicationServiceProvider(context);
+
         return new EncryptedPropertyServices(
-            _cryptor,
-            sp.GetRequiredService<EncryptedPropertyStateTracker>());
+            applicationServices.GetRequiredService<IEncryptedPropertyCryptor>(),
+            applicationServices.GetRequiredService<EncryptedPropertyModelCache>(),
+            efServices.GetRequiredService<EncryptedPropertyStateTracker>());
     }
 
-    private EncryptedPropertyModel GetModel(DbContext context)
+    private static IServiceProvider GetApplicationServiceProvider(DbContext context)
     {
-        return _modelCache.GetOrAdd(context.Model);
+        var extension = context.GetService<IDbContextOptions>()
+            .FindExtension<EncryptedPropertiesDbContextOptionsExtension>();
+
+        return extension?.ApplicationServiceProvider
+            ?? throw new InvalidOperationException(
+                "Encrypted properties are not configured for this DbContext. Call UseEncryptedProperties when configuring the DbContext options.");
+    }
+
+    private static EncryptedPropertyModel GetModel(
+        DbContext context,
+        EncryptedPropertyModelCache modelCache)
+    {
+        return modelCache.GetOrAdd(context.Model);
     }
 
     private readonly record struct EncryptedPropertyServices(
         IEncryptedPropertyCryptor Cryptor,
+        EncryptedPropertyModelCache ModelCache,
         EncryptedPropertyStateTracker StateTracker);
 }

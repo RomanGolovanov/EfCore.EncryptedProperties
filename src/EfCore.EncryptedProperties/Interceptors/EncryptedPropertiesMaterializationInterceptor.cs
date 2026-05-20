@@ -11,29 +11,23 @@ namespace EfCore.EncryptedProperties.Interceptors;
 
 internal sealed class EncryptedPropertiesMaterializationInterceptor : IMaterializationInterceptor
 {
-    private readonly IEncryptedPropertyCryptor _cryptor;
-    private readonly EncryptedPropertyModelCache _modelCache;
+    internal static readonly EncryptedPropertiesMaterializationInterceptor Instance = new();
 
-    public EncryptedPropertiesMaterializationInterceptor(
-        IEncryptedPropertyCryptor cryptor,
-        EncryptedPropertyModelCache? modelCache = null)
+    private EncryptedPropertiesMaterializationInterceptor()
     {
-        _cryptor = cryptor;
-        _modelCache = modelCache ?? new EncryptedPropertyModelCache();
     }
 
     public object InitializedInstance(MaterializationInterceptionData materializationData, object entity)
     {
         var context = materializationData.Context;
-        var model = GetModel(context);
+        var services = GetServices(context);
+        var model = GetModel(context, services.ModelCache);
 
         var entityTypeName = materializationData.EntityType.ClrType.FullName!;
         var descriptors = model.GetForEntityType(entityTypeName);
 
         if (descriptors.Count == 0)
             return entity;
-
-        var services = GetServices(context);
 
         foreach (var descriptor in descriptors)
         {
@@ -104,20 +98,36 @@ internal sealed class EncryptedPropertiesMaterializationInterceptor : IMateriali
                 $"Encrypted property '{descriptor.EntityTypeName}.{descriptor.PropertyName}' is not configured for lazy encrypted values.");
     }
 
-    private EncryptedPropertyServices GetServices(DbContext context)
+    private static EncryptedPropertyServices GetServices(DbContext context)
     {
-        var sp = ((IInfrastructure<IServiceProvider>)context).Instance;
+        var efServices = ((IInfrastructure<IServiceProvider>)context).Instance;
+        var applicationServices = GetApplicationServiceProvider(context);
+
         return new EncryptedPropertyServices(
-            _cryptor,
-            sp.GetRequiredService<EncryptedPropertyStateTracker>());
+            applicationServices.GetRequiredService<IEncryptedPropertyCryptor>(),
+            applicationServices.GetRequiredService<EncryptedPropertyModelCache>(),
+            efServices.GetRequiredService<EncryptedPropertyStateTracker>());
     }
 
-    private EncryptedPropertyModel GetModel(DbContext context)
+    private static IServiceProvider GetApplicationServiceProvider(DbContext context)
     {
-        return _modelCache.GetOrAdd(context.Model);
+        var extension = context.GetService<IDbContextOptions>()
+            .FindExtension<EncryptedPropertiesDbContextOptionsExtension>();
+
+        return extension?.ApplicationServiceProvider
+            ?? throw new InvalidOperationException(
+                "Encrypted properties are not configured for this DbContext. Call UseEncryptedProperties when configuring the DbContext options.");
+    }
+
+    private static EncryptedPropertyModel GetModel(
+        DbContext context,
+        EncryptedPropertyModelCache modelCache)
+    {
+        return modelCache.GetOrAdd(context.Model);
     }
 
     private readonly record struct EncryptedPropertyServices(
         IEncryptedPropertyCryptor Cryptor,
+        EncryptedPropertyModelCache ModelCache,
         EncryptedPropertyStateTracker StateTracker);
 }

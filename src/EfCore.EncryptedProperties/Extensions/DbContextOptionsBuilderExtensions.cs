@@ -17,12 +17,12 @@ public static class DbContextOptionsBuilderExtensions
         ArgumentNullException.ThrowIfNull(serviceProvider);
 
         _ = serviceProvider.GetRequiredService<IEncryptedPropertyCryptor>();
-        var extension = new EncryptedPropertiesDbContextOptionsExtension();
+        var extension = new EncryptedPropertiesDbContextOptionsExtension(serviceProvider);
         ((IDbContextOptionsBuilderInfrastructure)builder).AddOrUpdateExtension(extension);
 
         builder.AddInterceptors(
-            serviceProvider.GetRequiredService<EncryptedPropertiesSaveChangesInterceptor>(),
-            serviceProvider.GetRequiredService<EncryptedPropertiesMaterializationInterceptor>());
+            EncryptedPropertiesSaveChangesInterceptor.Instance,
+            EncryptedPropertiesMaterializationInterceptor.Instance);
 
         return builder;
     }

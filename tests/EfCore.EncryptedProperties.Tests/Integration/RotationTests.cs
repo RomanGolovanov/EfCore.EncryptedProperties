@@ -3,7 +3,6 @@ using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Extensions;
 using EfCore.EncryptedProperties.KeyManagement;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -182,8 +181,6 @@ public class RotationTests
         services.AddDbContext<TestDbContext>((sp, builder) =>
         {
             builder.UseInMemoryDatabase(dbName);
-            builder.ConfigureWarnings(warnings =>
-                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
             builder.UseEncryptedProperties(sp);
         });
         return services.BuildServiceProvider();
@@ -213,8 +210,6 @@ public class RotationTests
         services.AddDbContext<TestDbContext>((sp, builder) =>
         {
             builder.UseInMemoryDatabase(dbName, dbRoot);
-            builder.ConfigureWarnings(warnings =>
-                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
             builder.UseEncryptedProperties(sp);
         });
         return services.BuildServiceProvider();

@@ -1,6 +1,5 @@
 using EfCore.EncryptedProperties.Extensions;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace EfCore.EncryptedProperties.Testing;
@@ -24,7 +23,6 @@ public static class DbContextOptionsBuilderTestExtensions
         this DbContextOptionsBuilder builder,
         IServiceProvider serviceProvider)
     {
-        builder.ConfigureWarnings(warnings => warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
         return builder.UseEncryptedProperties(serviceProvider);
     }
 }
