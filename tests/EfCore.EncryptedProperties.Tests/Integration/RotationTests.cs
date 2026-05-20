@@ -182,6 +182,8 @@ public class RotationTests
         services.AddDbContext<TestDbContext>((sp, builder) =>
         {
             builder.UseInMemoryDatabase(dbName);
+            builder.ConfigureWarnings(warnings =>
+                warnings.Ignore(CoreEventId.ManyServiceProvidersCreatedWarning));
             builder.UseEncryptedProperties(sp);
         });
         return services.BuildServiceProvider();
