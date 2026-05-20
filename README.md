@@ -8,7 +8,7 @@ Property-level encryption for Entity Framework Core 8, 9, and 10. Mark the prope
 - **Use it for:** PII, notes, tokens, small secrets, and values the database should never see in plaintext
 - **Entity experience:** normal CLR properties for transparent reads, or `EncryptedValue<T>` when you want explicit async decryption
 - **Crypto shape:** AES-256-GCM payload encryption, a fresh content-encryption key per encrypted value, AES-GCM key wrapping, and RSA-wrapped key-encryption keys
-- **Key management:** file, OS certificate store, in-memory, and Azure Key Vault RSA providers, plus in-memory, file-backed, or database-backed key-chain storage
+- **Key management:** file PEM, file PFX, OS certificate store, in-memory, Azure Blob, and Azure Key Vault RSA providers, plus in-memory, file-backed, Azure Blob, or database-backed key-chain storage
 
 ## Why This Package
 
@@ -16,8 +16,8 @@ Many EF Core encryption approaches stop at the first step: convert a property to
 
 - **Envelope encryption out of the box.** Each encrypted value gets its own content-encryption key. Content keys are wrapped by per-purpose key-encryption keys, and key-encryption keys are wrapped by an RSA provider.
 - **Key purposes and rotation.** Use separate key chains for different data classes, such as `email`, `notes`, or `tokens`, and rotate new writes without losing access to old rows.
-- **Production master key locations.** Keep the RSA wrapping key in a PEM file, an OS certificate store, in Azure Key Vault when the private key should stay outside the host, or in memory for tests and demos.
-- **Durable key chains.** Store wrapped key records in files or beside the application database, with one active key per purpose.
+- **Production master key locations.** Keep the RSA wrapping key in a PEM file, a read-only PFX file, an OS certificate store, Azure Blob Storage, in Azure Key Vault when the private key should stay outside the host, or in memory for tests and demos.
+- **Durable key chains.** Store wrapped key records in files, Azure Blob Storage, or beside the application database, with one active key per purpose.
 - **Two entity styles.** Use ordinary CLR properties when transparency matters, or `EncryptedValue<T>` when you want decryption to be explicit and async at the call site.
 - **Typed values, not only strings.** Supported values include primitives, `string`, `byte[]`, `DateTime`, `DateTimeOffset`, `Guid`, enums, and nullable variants.
 
@@ -168,6 +168,21 @@ The file key-ring provider creates the current PEM file if it does not exist. Ba
 
 For simple single-key deployments, `WithFileRsaKeyProvider("keys/rsa-key.pem", "rsa-v1")` is still available.
 
+### Read-Only PFX Files
+
+```csharp
+services.AddEncryptedProperties(cfg => cfg
+    .WithFilePfxRsaKeyRingProvider(options =>
+    {
+        options.CurrentKeyId = "rsa-v2";
+        options.AddKey("rsa-v1", "keys/rsa-v1.pfx", oldPassword);
+        options.AddKey("rsa-v2", "keys/rsa-v2.pfx", currentPassword);
+    })
+    .WithDatabaseKeyChain(SqlClientFactory.Instance, connectionString));
+```
+
+PFX providers are read-only. They never create certificate files, so every configured current and historical PFX must already exist and contain an RSA private key. For a single PFX, use `WithFilePfxRsaKeyProvider("keys/rsa-v1.pfx", "rsa-v1", password)`.
+
 ### File-Backed Key Chain
 
 ```csharp
@@ -177,6 +192,30 @@ services.AddEncryptedProperties(cfg => cfg
 ```
 
 The file key chain stores wrapped KEK records as one JSON file per key purpose in the configured directory. Protect and back up this directory alongside the RSA private key; losing either the RSA key or the key-chain files can make existing encrypted data unreadable.
+
+### Azure Blob Storage
+
+```csharp
+var container = new BlobContainerClient(
+    new Uri("https://account.blob.core.windows.net/encryption"),
+    new DefaultAzureCredential());
+
+services.AddEncryptedProperties(cfg => cfg
+    .WithAzureBlobRsaKeyRingProvider(container, options =>
+    {
+        options.BlobPrefix = "rsa/";
+        options.CurrentKeyId = "rsa-v1";
+        options.CreateContainerIfNotExists = true;
+        options.AddKey("rsa-v1", "rsa-v1.pem");
+    })
+    .WithAzureBlobKeyChain(container, options =>
+    {
+        options.BlobPrefix = "key-chain/";
+        options.CreateContainerIfNotExists = true;
+    }));
+```
+
+The Blob PEM key-ring provider can create the current PEM blob if it is missing; historical PEM blobs must already exist. `WithAzureBlobPfxRsaKeyRingProvider` is available for read-only PFX blobs. Blob key-chain storage uses optimistic ETag writes to keep one active KEK per purpose under concurrent callers.
 
 ### OS Certificate Store
 

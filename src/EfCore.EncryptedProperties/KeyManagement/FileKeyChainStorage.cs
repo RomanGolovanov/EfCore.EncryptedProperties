@@ -1,14 +1,9 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using EfCore.EncryptedProperties.Abstractions;
 
 namespace EfCore.EncryptedProperties.KeyManagement;
 
 public sealed class FileKeyChainStorage : IKeyChainStorage
 {
-    private const int CurrentFormatVersion = 1;
     private const string PurposeFilePrefix = "purpose-";
     private const string PurposeFileExtension = ".json";
     private const string LockFileExtension = ".lock";
@@ -33,7 +28,7 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
 
         return document.Keys!
             .Where(key => key.IsActive)
-            .Select(key => MapToRecord(document.Purpose, key))
+            .Select(key => KeyChainStorageDocuments.MapToRecord(document.Purpose, key))
             .OrderByDescending(record => record.CreatedAt)
             .FirstOrDefault();
     }
@@ -44,7 +39,7 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
         EncryptedKeyRecord candidate,
         CancellationToken cancellationToken = default)
     {
-        ValidateCandidate(purpose, candidate);
+        KeyChainStorageDocuments.ValidateCandidate(purpose, candidate);
 
         await using var purposeLock = await AcquirePurposeLockAsync(purpose, cancellationToken);
         var document = await ReadPurposeDocumentAsync(purpose, cancellationToken);
@@ -52,18 +47,18 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
 
         var active = keys
             .Where(key => key.IsActive)
-            .Select(key => MapToRecord(document.Purpose, key))
+            .Select(key => KeyChainStorageDocuments.MapToRecord(document.Purpose, key))
             .OrderByDescending(record => record.CreatedAt)
             .FirstOrDefault();
 
-        if (active is not null && IsActiveKeyValid(active, rotateBefore))
+        if (active is not null && KeyChainStorageDocuments.IsActiveKeyValid(active, rotateBefore))
             return active;
 
         foreach (var existing in keys.Where(key => key.IsActive))
             existing.IsActive = false;
 
         keys.RemoveAll(key => key.Id == candidate.Id);
-        keys.Add(MapToFileRecord(candidate));
+        keys.Add(KeyChainStorageDocuments.MapToDocumentRecord(candidate));
 
         await WriteDocumentAsync(document, cancellationToken);
         return candidate;
@@ -80,7 +75,7 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
         {
             var key = document.Keys!.FirstOrDefault(key => key.Id == id);
             if (key is not null)
-                return MapToRecord(document.Purpose, key);
+                return KeyChainStorageDocuments.MapToRecord(document.Purpose, key);
         }
 
         return null;
@@ -92,19 +87,19 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
         var documents = await ReadAllDocumentsAsync(cancellationToken);
 
         return documents
-            .SelectMany(document => document.Keys!.Select(key => MapToRecord(document.Purpose, key)))
+            .SelectMany(document => document.Keys!.Select(key => KeyChainStorageDocuments.MapToRecord(document.Purpose, key)))
             .OrderBy(record => record.Purpose, StringComparer.Ordinal)
             .ThenBy(record => record.CreatedAt)
             .ToList();
     }
 
-    private async ValueTask<FileKeyChainDocument> ReadPurposeDocumentAsync(
+    private async ValueTask<KeyChainDocument> ReadPurposeDocumentAsync(
         string purpose,
         CancellationToken cancellationToken)
     {
         var path = GetPurposeFilePath(purpose);
         if (!File.Exists(path))
-            return CreateDocument(purpose);
+            return KeyChainStorageDocuments.Create(purpose);
 
         var document = await ReadDocumentFileAsync(path, cancellationToken);
         if (!string.Equals(document.Purpose, purpose, StringComparison.Ordinal))
@@ -116,10 +111,10 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
         return document;
     }
 
-    private async ValueTask<IReadOnlyList<FileKeyChainDocument>> ReadAllDocumentsAsync(
+    private async ValueTask<IReadOnlyList<KeyChainDocument>> ReadAllDocumentsAsync(
         CancellationToken cancellationToken)
     {
-        var documents = new List<FileKeyChainDocument>();
+        var documents = new List<KeyChainDocument>();
         foreach (var path in Directory.EnumerateFiles(_directoryPath, $"{PurposeFilePrefix}*", SearchOption.TopDirectoryOnly)
                      .Where(path => path.EndsWith(PurposeFileExtension, StringComparison.OrdinalIgnoreCase)))
         {
@@ -130,7 +125,7 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
         return documents;
     }
 
-    private static async ValueTask<FileKeyChainDocument> ReadDocumentFileAsync(
+    private static async ValueTask<KeyChainDocument> ReadDocumentFileAsync(
         string path,
         CancellationToken cancellationToken)
     {
@@ -144,20 +139,11 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
                 Options = FileOptions.Asynchronous
             });
 
-        var document = await JsonSerializer.DeserializeAsync(
-            stream,
-            FileKeyChainStorageJsonContext.Default.FileKeyChainDocument,
-            cancellationToken);
-
-        if (document is null)
-            throw new FormatException($"File key chain document '{path}' is empty or invalid.");
-
-        ValidateDocument(path, document);
-        return document;
+        return await KeyChainStorageDocuments.ReadAsync(stream, path, cancellationToken);
     }
 
     private async ValueTask WriteDocumentAsync(
-        FileKeyChainDocument document,
+        KeyChainDocument document,
         CancellationToken cancellationToken)
     {
         var path = GetPurposeFilePath(document.Purpose);
@@ -175,11 +161,7 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
                     Options = FileOptions.Asynchronous | FileOptions.WriteThrough
                 }))
             {
-                await JsonSerializer.SerializeAsync(
-                    stream,
-                    document,
-                    FileKeyChainStorageJsonContext.Default.FileKeyChainDocument,
-                    cancellationToken);
+                await KeyChainStorageDocuments.WriteAsync(stream, document, cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
 
@@ -223,96 +205,12 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
 
     private string GetPurposeFilePath(string purpose)
     {
-        return Path.Combine(_directoryPath, $"{PurposeFilePrefix}{ComputePurposeHash(purpose)}{PurposeFileExtension}");
+        return Path.Combine(_directoryPath, $"{PurposeFilePrefix}{KeyChainStorageDocuments.ComputePurposeHash(purpose)}{PurposeFileExtension}");
     }
 
     private string GetPurposeLockFilePath(string purpose)
     {
-        return Path.Combine(_directoryPath, $"{PurposeFilePrefix}{ComputePurposeHash(purpose)}{LockFileExtension}");
-    }
-
-    private static string ComputePurposeHash(string purpose)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(purpose));
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
-
-    private static FileKeyChainDocument CreateDocument(string purpose)
-    {
-        return new FileKeyChainDocument
-        {
-            FormatVersion = CurrentFormatVersion,
-            Purpose = purpose,
-            Keys = new List<FileKeyChainKeyRecord>()
-        };
-    }
-
-    private static FileKeyChainKeyRecord MapToFileRecord(EncryptedKeyRecord record)
-    {
-        return new FileKeyChainKeyRecord
-        {
-            Id = record.Id,
-            RsaKeyId = record.RsaKeyId,
-            Algorithm = record.Algorithm,
-            EncryptedKey = record.EncryptedKey,
-            CreatedAt = record.CreatedAt,
-            IsActive = record.IsActive
-        };
-    }
-
-    private static EncryptedKeyRecord MapToRecord(string purpose, FileKeyChainKeyRecord record)
-    {
-        return new EncryptedKeyRecord
-        {
-            Id = record.Id,
-            Purpose = purpose,
-            RsaKeyId = record.RsaKeyId,
-            Algorithm = record.Algorithm,
-            EncryptedKey = record.EncryptedKey,
-            CreatedAt = record.CreatedAt,
-            IsActive = record.IsActive
-        };
-    }
-
-    private static bool IsActiveKeyValid(EncryptedKeyRecord record, DateTimeOffset? rotateBefore)
-    {
-        return rotateBefore is null || record.CreatedAt >= rotateBefore.Value;
-    }
-
-    private static void ValidateCandidate(string purpose, EncryptedKeyRecord candidate)
-    {
-        if (!string.Equals(candidate.Purpose, purpose, StringComparison.Ordinal))
-            throw new ArgumentException("Candidate purpose must match the requested purpose.", nameof(candidate));
-
-        if (!candidate.IsActive)
-            throw new ArgumentException("Candidate key must be active.", nameof(candidate));
-    }
-
-    private static void ValidateDocument(string path, FileKeyChainDocument document)
-    {
-        if (document.FormatVersion != CurrentFormatVersion)
-            throw new FormatException($"File key chain document '{path}' has unsupported format version {document.FormatVersion}.");
-
-        if (string.IsNullOrWhiteSpace(document.Purpose))
-            throw new FormatException($"File key chain document '{path}' has a missing purpose.");
-
-        if (document.Keys is null)
-            throw new FormatException($"File key chain document '{path}' has a missing keys collection.");
-
-        foreach (var key in document.Keys)
-        {
-            if (key.Id == Guid.Empty)
-                throw new FormatException($"File key chain document '{path}' contains a key with an empty ID.");
-
-            if (string.IsNullOrWhiteSpace(key.RsaKeyId))
-                throw new FormatException($"File key chain document '{path}' contains a key with a missing RSA key ID.");
-
-            if (string.IsNullOrWhiteSpace(key.Algorithm))
-                throw new FormatException($"File key chain document '{path}' contains a key with a missing algorithm.");
-
-            if (string.IsNullOrWhiteSpace(key.EncryptedKey))
-                throw new FormatException($"File key chain document '{path}' contains a key with a missing encrypted key.");
-        }
+        return Path.Combine(_directoryPath, $"{PurposeFilePrefix}{KeyChainStorageDocuments.ComputePurposeHash(purpose)}{LockFileExtension}");
     }
 
     private static void TryDelete(string path)
@@ -328,40 +226,3 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
         }
     }
 }
-
-internal sealed class FileKeyChainDocument
-{
-    [JsonPropertyName("formatVersion")]
-    public int FormatVersion { get; set; }
-
-    [JsonPropertyName("purpose")]
-    public string Purpose { get; set; } = string.Empty;
-
-    [JsonPropertyName("keys")]
-    public List<FileKeyChainKeyRecord>? Keys { get; set; } = new();
-}
-
-internal sealed class FileKeyChainKeyRecord
-{
-    [JsonPropertyName("id")]
-    public Guid Id { get; set; }
-
-    [JsonPropertyName("rsaKeyId")]
-    public string RsaKeyId { get; set; } = string.Empty;
-
-    [JsonPropertyName("algorithm")]
-    public string Algorithm { get; set; } = string.Empty;
-
-    [JsonPropertyName("encryptedKey")]
-    public string EncryptedKey { get; set; } = string.Empty;
-
-    [JsonPropertyName("createdAt")]
-    public DateTimeOffset CreatedAt { get; set; }
-
-    [JsonPropertyName("isActive")]
-    public bool IsActive { get; set; }
-}
-
-[JsonSourceGenerationOptions(WriteIndented = true)]
-[JsonSerializable(typeof(FileKeyChainDocument))]
-internal partial class FileKeyChainStorageJsonContext : JsonSerializerContext;

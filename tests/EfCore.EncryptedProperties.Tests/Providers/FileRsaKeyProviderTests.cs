@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using EfCore.EncryptedProperties.Providers;
 
 namespace EfCore.EncryptedProperties.Tests.Providers;
@@ -191,5 +193,109 @@ public sealed class FileRsaKeyProviderTests : IDisposable
             provider.UnwrapKeyAsync(wrapped.Ciphertext, "rsa-missing").AsTask());
 
         Assert.Contains("rsa-missing", ex.Message);
+    }
+
+    [Fact]
+    public async Task Pfx_WrapUnwrap_RoundTrip()
+    {
+        var path = Path.Combine(_tempDir, "rsa-v1.pfx");
+        const string password = "test-password";
+        await CreatePfxAsync(path, password);
+        var provider = new FilePfxRsaKeyProvider(path, "rsa-v1", password);
+        var plaintext = new byte[32];
+        Random.Shared.NextBytes(plaintext);
+
+        var wrapped = await provider.WrapKeyAsync(plaintext);
+        var unwrapped = await provider.UnwrapKeyAsync(wrapped.Ciphertext, wrapped.RsaKeyId);
+
+        Assert.Equal(plaintext, unwrapped);
+    }
+
+    [Fact]
+    public void Pfx_MissingFile_Throws()
+    {
+        var path = Path.Combine(_tempDir, "missing.pfx");
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            new FilePfxRsaKeyProvider(path, "rsa-v1", "test-password"));
+
+        Assert.Contains("was not found", ex.Message);
+    }
+
+    [Fact]
+    public async Task Pfx_WrongPassword_Throws()
+    {
+        var path = Path.Combine(_tempDir, "rsa-v1.pfx");
+        await CreatePfxAsync(path, "correct-password");
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            new FilePfxRsaKeyProvider(path, "rsa-v1", "wrong-password"));
+
+        Assert.Contains("could not be loaded", ex.Message);
+    }
+
+    [Fact]
+    public async Task PfxKeyRing_UnwrapsHistoricalKey()
+    {
+        var oldPath = Path.Combine(_tempDir, "rsa-v1.pfx");
+        var currentPath = Path.Combine(_tempDir, "rsa-v2.pfx");
+        await CreatePfxAsync(oldPath, "old-password");
+        await CreatePfxAsync(currentPath, "current-password");
+
+        var oldProvider = new FilePfxRsaKeyProvider(oldPath, "rsa-v1", "old-password");
+        var plaintext = new byte[32];
+        Random.Shared.NextBytes(plaintext);
+        var wrappedWithOldKey = await oldProvider.WrapKeyAsync(plaintext);
+
+        var options = new FilePfxRsaKeyRingProviderOptions
+        {
+            CurrentKeyId = "rsa-v2"
+        };
+        options.AddKey("rsa-v1", oldPath, "old-password");
+        options.AddKey("rsa-v2", currentPath, "current-password");
+
+        var provider = new FilePfxRsaKeyRingProvider(options);
+        var unwrapped = await provider.UnwrapKeyAsync(
+            wrappedWithOldKey.Ciphertext,
+            wrappedWithOldKey.RsaKeyId);
+
+        Assert.Equal(plaintext, unwrapped);
+    }
+
+    [Fact]
+    public void PfxKeyRing_MissingCurrentKeyFile_Throws()
+    {
+        var currentPath = Path.Combine(_tempDir, "rsa-v2.pfx");
+        var options = new FilePfxRsaKeyRingProviderOptions
+        {
+            CurrentKeyId = "rsa-v2"
+        };
+        options.AddKey("rsa-v2", currentPath, "current-password");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => new FilePfxRsaKeyRingProvider(options));
+
+        Assert.Contains("was not found", ex.Message);
+    }
+
+    private static async Task CreatePfxAsync(string path, string password)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest(
+            "CN=EfCore.EncryptedProperties.Tests",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(
+            new X509KeyUsageExtension(
+                X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DataEncipherment,
+                critical: false));
+
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddYears(1));
+
+        await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, password));
     }
 }

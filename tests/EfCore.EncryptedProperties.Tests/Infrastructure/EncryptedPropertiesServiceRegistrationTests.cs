@@ -1,5 +1,7 @@
 using System.Data.Common;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using Azure.Storage.Blobs;
 using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Extensions;
 using EfCore.EncryptedProperties.Infrastructure;
@@ -173,6 +175,104 @@ public class EncryptedPropertiesServiceRegistrationTests
     }
 
     [Fact]
+    public async Task WithFilePfxRsaKeyProvider_RegistersProvider()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var path = Path.Combine(tempDir, "rsa-v1.pfx");
+            await CreatePfxAsync(path, "test-password");
+            var services = new ServiceCollection();
+            services.AddEncryptedProperties(cfg =>
+            {
+                cfg.WithFilePfxRsaKeyProvider(path, "rsa-v1", "test-password");
+                cfg.WithInMemoryKeyChain();
+            });
+
+            using var provider = services.BuildServiceProvider();
+
+            Assert.IsType<FilePfxRsaKeyProvider>(
+                provider.GetRequiredService<IRsaKeyProvider>());
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WithFilePfxRsaKeyRingProvider_RegistersProvider()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var path = Path.Combine(tempDir, "rsa-v1.pfx");
+            await CreatePfxAsync(path, "test-password");
+            var services = new ServiceCollection();
+            services.AddEncryptedProperties(cfg =>
+            {
+                cfg.WithFilePfxRsaKeyRingProvider(options =>
+                {
+                    options.CurrentKeyId = "rsa-v1";
+                    options.AddKey("rsa-v1", path, "test-password");
+                });
+                cfg.WithInMemoryKeyChain();
+            });
+
+            using var provider = services.BuildServiceProvider();
+
+            Assert.IsType<FilePfxRsaKeyRingProvider>(
+                provider.GetRequiredService<IRsaKeyProvider>());
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void WithAzureBlobRsaKeyRingProvider_RegistersProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddEncryptedProperties(cfg =>
+        {
+            cfg.WithAzureBlobRsaKeyRingProvider(CreateBlobContainerClient(), options =>
+            {
+                options.CurrentKeyId = "rsa-v1";
+                options.AddKey("rsa-v1", "rsa-v1.pem");
+            });
+            cfg.WithInMemoryKeyChain();
+        });
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<AzureBlobRsaKeyRingProvider>(
+            provider.GetRequiredService<IRsaKeyProvider>());
+    }
+
+    [Fact]
+    public void WithAzureBlobPfxRsaKeyRingProvider_RegistersProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddEncryptedProperties(cfg =>
+        {
+            cfg.WithAzureBlobPfxRsaKeyRingProvider(CreateBlobContainerClient(), options =>
+            {
+                options.CurrentKeyId = "rsa-v1";
+                options.AddKey("rsa-v1", "rsa-v1.pfx", "test-password");
+            });
+            cfg.WithInMemoryKeyChain();
+        });
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<AzureBlobPfxRsaKeyRingProvider>(
+            provider.GetRequiredService<IRsaKeyProvider>());
+    }
+
+    [Fact]
     public void WithFileKeyChain_RegistersStorage()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
@@ -212,6 +312,22 @@ public class EncryptedPropertiesServiceRegistrationTests
     }
 
     [Fact]
+    public void WithAzureBlobKeyChain_RegistersStorage()
+    {
+        var services = new ServiceCollection();
+        services.AddEncryptedProperties(cfg =>
+        {
+            cfg.WithInMemoryRsaKeyProvider(RSA.Create(2048), "rsa-v1");
+            cfg.WithAzureBlobKeyChain(CreateBlobContainerClient());
+        });
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<AzureBlobKeyChainStorage>(
+            provider.GetRequiredService<IKeyChainStorage>());
+    }
+
+    [Fact]
     public void WithDatabaseKeyChain_MissingConnectionString_Throws()
     {
         var services = new ServiceCollection();
@@ -247,5 +363,30 @@ public class EncryptedPropertiesServiceRegistrationTests
         {
             return null;
         }
+    }
+
+    private static BlobContainerClient CreateBlobContainerClient()
+        => new(new Uri("https://account.blob.core.windows.net/encrypted-properties-tests"));
+
+    private static async Task CreatePfxAsync(string path, string password)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest(
+            "CN=EfCore.EncryptedProperties.Tests",
+            rsa,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(
+            new X509KeyUsageExtension(
+                X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.DataEncipherment,
+                critical: false));
+
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddYears(1));
+
+        await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, password));
     }
 }

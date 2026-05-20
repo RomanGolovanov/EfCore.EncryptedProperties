@@ -1,6 +1,8 @@
 using System.Data.Common;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Azure.Core;
+using Azure.Storage.Blobs;
 using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Configuration;
 using EfCore.EncryptedProperties.Cryptography;
@@ -123,6 +125,33 @@ public sealed class EncryptedPropertiesServiceBuilder
         return this;
     }
 
+    public EncryptedPropertiesServiceBuilder WithFilePfxRsaKeyProvider(
+        string filePath,
+        string keyId,
+        string? password = null,
+        X509KeyStorageFlags keyStorageFlags = X509KeyStorageFlags.EphemeralKeySet)
+    {
+        ThrowIfNullOrWhiteSpace(filePath);
+        ThrowIfNullOrWhiteSpace(keyId);
+
+        ReplaceSingleton<IRsaKeyProvider>(new FilePfxRsaKeyProvider(filePath, keyId, password, keyStorageFlags));
+        _rsaKeyProviderConfigured = true;
+        return this;
+    }
+
+    public EncryptedPropertiesServiceBuilder WithFilePfxRsaKeyRingProvider(
+        Action<FilePfxRsaKeyRingProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new FilePfxRsaKeyRingProviderOptions();
+        configure(options);
+
+        ReplaceSingleton<IRsaKeyProvider>(new FilePfxRsaKeyRingProvider(options));
+        _rsaKeyProviderConfigured = true;
+        return this;
+    }
+
     public EncryptedPropertiesServiceBuilder WithAzureKeyVaultRsaKeyProvider(
         Uri keyVaultKeyUri,
         TokenCredential credential)
@@ -148,6 +177,82 @@ public sealed class EncryptedPropertiesServiceBuilder
         return this;
     }
 
+    public EncryptedPropertiesServiceBuilder WithAzureBlobRsaKeyRingProvider(
+        Action<AzureBlobRsaKeyRingProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new AzureBlobRsaKeyRingProviderOptions();
+        configure(options);
+
+        ReplaceSingleton<IRsaKeyProvider>(new AzureBlobRsaKeyRingProvider(options));
+        _rsaKeyProviderConfigured = true;
+        return this;
+    }
+
+    public EncryptedPropertiesServiceBuilder WithAzureBlobRsaKeyRingProvider(
+        BlobContainerClient containerClient,
+        Action<AzureBlobRsaKeyRingProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(containerClient);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        return WithAzureBlobRsaKeyRingProvider(options =>
+        {
+            options.ContainerClient = containerClient;
+            configure(options);
+        });
+    }
+
+    public EncryptedPropertiesServiceBuilder WithAzureBlobRsaKeyRingProvider(
+        Uri containerUri,
+        TokenCredential credential,
+        Action<AzureBlobRsaKeyRingProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(containerUri);
+        ArgumentNullException.ThrowIfNull(credential);
+
+        return WithAzureBlobRsaKeyRingProvider(new BlobContainerClient(containerUri, credential), configure);
+    }
+
+    public EncryptedPropertiesServiceBuilder WithAzureBlobPfxRsaKeyRingProvider(
+        Action<AzureBlobPfxRsaKeyRingProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new AzureBlobPfxRsaKeyRingProviderOptions();
+        configure(options);
+
+        ReplaceSingleton<IRsaKeyProvider>(new AzureBlobPfxRsaKeyRingProvider(options));
+        _rsaKeyProviderConfigured = true;
+        return this;
+    }
+
+    public EncryptedPropertiesServiceBuilder WithAzureBlobPfxRsaKeyRingProvider(
+        BlobContainerClient containerClient,
+        Action<AzureBlobPfxRsaKeyRingProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(containerClient);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        return WithAzureBlobPfxRsaKeyRingProvider(options =>
+        {
+            options.ContainerClient = containerClient;
+            configure(options);
+        });
+    }
+
+    public EncryptedPropertiesServiceBuilder WithAzureBlobPfxRsaKeyRingProvider(
+        Uri containerUri,
+        TokenCredential credential,
+        Action<AzureBlobPfxRsaKeyRingProviderOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(containerUri);
+        ArgumentNullException.ThrowIfNull(credential);
+
+        return WithAzureBlobPfxRsaKeyRingProvider(new BlobContainerClient(containerUri, credential), configure);
+    }
+
     public EncryptedPropertiesServiceBuilder WithInMemoryKeyChain()
     {
         ReplaceSingleton<IKeyChainStorage>(new InMemoryKeyChainStorage());
@@ -162,6 +267,31 @@ public sealed class EncryptedPropertiesServiceBuilder
         ReplaceSingleton<IKeyChainStorage>(new FileKeyChainStorage(directoryPath));
         _keyChainStorageConfigured = true;
         return this;
+    }
+
+    public EncryptedPropertiesServiceBuilder WithAzureBlobKeyChain(
+        BlobContainerClient containerClient,
+        Action<AzureBlobKeyChainStorageOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(containerClient);
+
+        var options = new AzureBlobKeyChainStorageOptions();
+        configure?.Invoke(options);
+
+        ReplaceSingleton<IKeyChainStorage>(new AzureBlobKeyChainStorage(containerClient, options));
+        _keyChainStorageConfigured = true;
+        return this;
+    }
+
+    public EncryptedPropertiesServiceBuilder WithAzureBlobKeyChain(
+        Uri containerUri,
+        TokenCredential credential,
+        Action<AzureBlobKeyChainStorageOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(containerUri);
+        ArgumentNullException.ThrowIfNull(credential);
+
+        return WithAzureBlobKeyChain(new BlobContainerClient(containerUri, credential), configure);
     }
 
     public EncryptedPropertiesServiceBuilder WithDatabaseKeyChain(
@@ -203,11 +333,11 @@ public sealed class EncryptedPropertiesServiceBuilder
     {
         if (!_rsaKeyProviderConfigured)
             throw new InvalidOperationException(
-                "An RSA key provider must be configured via WithInMemoryRsaKeyProvider, WithFileRsaKeyProvider, WithFileRsaKeyRingProvider, WithAzureKeyVaultRsaKeyProvider, or WithX509StoreRsaKeyProvider.");
+                "An RSA key provider must be configured via WithInMemoryRsaKeyProvider, WithFileRsaKeyProvider, WithFileRsaKeyRingProvider, WithFilePfxRsaKeyProvider, WithFilePfxRsaKeyRingProvider, WithAzureKeyVaultRsaKeyProvider, WithAzureBlobRsaKeyRingProvider, WithAzureBlobPfxRsaKeyRingProvider, or WithX509StoreRsaKeyProvider.");
 
         if (!_keyChainStorageConfigured)
             throw new InvalidOperationException(
-                "A key chain storage must be configured via WithInMemoryKeyChain, WithFileKeyChain, or WithDatabaseKeyChain.");
+                "A key chain storage must be configured via WithInMemoryKeyChain, WithFileKeyChain, WithAzureBlobKeyChain, or WithDatabaseKeyChain.");
     }
 
     private void ReplaceSingleton<TService>(TService instance)
