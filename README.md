@@ -1,5 +1,7 @@
 # EfCore.EncryptedProperties
 
+[![Build and Publish](https://github.com/RomanGolovanov/EfCore.EncryptedProperties/actions/workflows/build-and-publish.yml/badge.svg)](https://github.com/RomanGolovanov/EfCore.EncryptedProperties/actions/workflows/build-and-publish.yml)
+
 Property-level encryption for Entity Framework Core 8, 9, and 10. Mark the properties that should be protected, configure where keys live, and keep using your entities in a normal EF workflow.
 
 `EfCore.EncryptedProperties` is aimed at applications that need more than a value converter wrapped around a single AES key. It encrypts individual EF properties before they reach database storage, uses authenticated encryption for the stored payload, and includes a key-chain layer for creating, wrapping, storing, rotating, caching, and preloading data keys.
