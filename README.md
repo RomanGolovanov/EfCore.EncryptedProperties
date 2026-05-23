@@ -298,6 +298,37 @@ This registers an `IHostedService` that unwraps all stored KEKs during host star
 
 Supported value types are primitives, `string`, `byte[]`, `bool`, `DateTime`, `DateTimeOffset`, `Guid`, enums backed by supported primitives, and nullable variants.
 
+### Custom Value Serializers
+
+Register a serializer when an encrypted property uses a plaintext type outside the built-in set. Built-in formats cannot be overridden, so existing encrypted values stay readable.
+
+```csharp
+using System.Text;
+using EfCore.EncryptedProperties.Serialization;
+
+services.AddEncryptedProperties(cfg => cfg
+    .WithFileRsaKeyProvider("rsa-key.pem", "rsa-v1")
+    .WithDatabaseKeyChain(SqlClientFactory.Instance, connectionString)
+    .WithValueSerializer<Uri>(new UriValueSerializer()));
+
+public sealed class Customer
+{
+    public Guid Id { get; set; }
+
+    [Encrypted("website")]
+    public Uri Website { get; set; } = new("https://example.com");
+}
+
+public sealed class UriValueSerializer : IEncryptedPropertyValueSerializer<Uri>
+{
+    public byte[] Serialize(Uri value)
+        => Encoding.UTF8.GetBytes(value.ToString());
+
+    public Uri Deserialize(byte[] data)
+        => new(Encoding.UTF8.GetString(data), UriKind.Absolute);
+}
+```
+
 ## Edge Cases
 
 ### Queries

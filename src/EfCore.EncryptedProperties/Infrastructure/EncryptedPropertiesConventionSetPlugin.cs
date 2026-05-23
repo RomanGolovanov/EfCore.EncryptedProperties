@@ -11,15 +11,31 @@ namespace EfCore.EncryptedProperties.Infrastructure;
 
 internal sealed class EncryptedPropertiesConventionSetPlugin : IConventionSetPlugin
 {
+    private readonly IReadOnlyList<Type> _customValueSerializerTypes;
+
+    public EncryptedPropertiesConventionSetPlugin(IReadOnlyList<Type> customValueSerializerTypes)
+    {
+        _customValueSerializerTypes = customValueSerializerTypes;
+    }
+
     public ConventionSet ModifyConventions(ConventionSet conventionSet)
     {
-        conventionSet.ModelFinalizingConventions.Insert(0, new EncryptedPropertiesStorageConvention());
+        conventionSet.ModelFinalizingConventions.Insert(
+            0,
+            new EncryptedPropertiesStorageConvention(_customValueSerializerTypes));
         return conventionSet;
     }
 }
 
 internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingConvention
 {
+    private readonly IReadOnlyList<Type> _customValueSerializerTypes;
+
+    public EncryptedPropertiesStorageConvention(IReadOnlyList<Type> customValueSerializerTypes)
+    {
+        _customValueSerializerTypes = customValueSerializerTypes;
+    }
+
     public void ProcessModelFinalizing(
         IConventionModelBuilder modelBuilder,
         IConventionContext<IConventionModelBuilder> context)
@@ -126,7 +142,7 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
             .FirstOrDefault();
     }
 
-    private static void ConfigureCiphertextStorage(IConventionEntityType entityType, IConventionProperty plaintextProperty)
+    private void ConfigureCiphertextStorage(IConventionEntityType entityType, IConventionProperty plaintextProperty)
     {
         if (plaintextProperty.IsKey()
             || plaintextProperty.IsForeignKey()
@@ -235,7 +251,7 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
             $"Encrypted property '{GetPropertyDisplayName(entityType, property)}' has invalid materialization mode '{materialization}'. Supported modes are '{EncryptedPropertyTypeSupport.DecryptOnReadMaterialization}' and '{EncryptedPropertyTypeSupport.LazyMaterialization}'.");
     }
 
-    private static void ValidateEncryptedProperty(
+    private void ValidateEncryptedProperty(
         IConventionEntityType entityType,
         IConventionProperty property,
         string materialization)
@@ -264,10 +280,10 @@ internal sealed class EncryptedPropertiesStorageConvention : IModelFinalizingCon
             plaintextType = property.ClrType;
         }
 
-        if (!EncryptedPropertyTypeSupport.IsSupportedPlaintextType(plaintextType))
+        if (!EncryptedPropertyTypeSupport.IsSupportedPlaintextType(plaintextType, _customValueSerializerTypes))
         {
             throw new InvalidOperationException(
-                $"Encrypted property '{GetPropertyDisplayName(entityType, property)}' has unsupported CLR type '{GetTypeDisplayName(plaintextType)}'. Supported encrypted property types are {EncryptedPropertyTypeSupport.SupportedTypesDescription}.");
+                $"Encrypted property '{GetPropertyDisplayName(entityType, property)}' has unsupported CLR type '{GetTypeDisplayName(plaintextType)}'. Supported encrypted property types are {EncryptedPropertyTypeSupport.SupportedTypesDescriptionWithCustomSerializers}.");
         }
     }
 

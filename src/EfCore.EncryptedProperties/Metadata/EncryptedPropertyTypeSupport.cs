@@ -12,6 +12,22 @@ internal static class EncryptedPropertyTypeSupport
 
     public static bool IsSupportedPlaintextType(Type type)
     {
+        return IsBuiltInPlaintextType(type);
+    }
+
+    public static bool IsSupportedPlaintextType(
+        Type type,
+        IReadOnlyCollection<Type> customValueSerializerTypes)
+    {
+        if (IsBuiltInPlaintextType(type))
+            return true;
+
+        var serializerType = Nullable.GetUnderlyingType(type) ?? type;
+        return customValueSerializerTypes.Contains(serializerType);
+    }
+
+    public static bool IsBuiltInPlaintextType(Type type)
+    {
         var nullableType = Nullable.GetUnderlyingType(type);
         if (nullableType is not null)
         {
@@ -30,6 +46,9 @@ internal static class EncryptedPropertyTypeSupport
 
     public static string SupportedTypesDescription =>
         "string, byte[], bool, numeric primitive types, decimal, DateTime, DateTimeOffset, Guid, enums, and nullable value-type variants";
+
+    public static string SupportedTypesDescriptionWithCustomSerializers =>
+        SupportedTypesDescription + ", or types registered with WithValueSerializer<TValue>()";
 
     private static bool IsSupportedNonNullablePlaintextType(Type type)
     {

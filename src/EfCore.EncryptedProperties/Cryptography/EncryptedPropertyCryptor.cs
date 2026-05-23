@@ -31,7 +31,8 @@ internal sealed class EncryptedPropertyCryptor : IEncryptedPropertyCryptor
         if (value is null)
             return null;
 
-        var plaintext = _serializer.Serialize(value, value.GetType());
+        var plaintextType = context.PlaintextType ?? value.GetType();
+        var plaintext = _serializer.Serialize(value, plaintextType);
         var kek = await _keyChainManager.GetActiveKeyAsync(context.Purpose, cancellationToken);
         var cek = CekGenerator.Generate();
 

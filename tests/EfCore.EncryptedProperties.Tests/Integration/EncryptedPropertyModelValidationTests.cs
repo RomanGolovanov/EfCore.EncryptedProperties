@@ -16,6 +16,7 @@ public class EncryptedPropertyModelValidationTests
         Assert.Contains(nameof(UnsupportedUriEntity.Website), ex.Message);
         Assert.Contains(typeof(Uri).FullName!, ex.Message);
         Assert.Contains("unsupported CLR type", ex.Message);
+        Assert.Contains("WithValueSerializer", ex.Message);
     }
 
     [Fact]
@@ -26,6 +27,7 @@ public class EncryptedPropertyModelValidationTests
         Assert.Contains(nameof(UnsupportedCustomTypeEntity.Secret), ex.Message);
         Assert.Contains(typeof(CustomSecret).FullName!, ex.Message);
         Assert.Contains("unsupported CLR type", ex.Message);
+        Assert.Contains("WithValueSerializer", ex.Message);
     }
 
     [Fact]
@@ -36,6 +38,7 @@ public class EncryptedPropertyModelValidationTests
         Assert.Contains(nameof(UnsupportedLazyUriEntity.Website), ex.Message);
         Assert.Contains(typeof(Uri).FullName!, ex.Message);
         Assert.Contains("unsupported CLR type", ex.Message);
+        Assert.Contains("WithValueSerializer", ex.Message);
     }
 
     [Fact]
@@ -106,6 +109,49 @@ public class EncryptedPropertyModelValidationTests
             Assert.Null(entity.Score);
             Assert.Null(entity.Token);
             Assert.Null(entity.FavoriteDay);
+        }
+    }
+
+    [Fact]
+    public async Task NullableSupportedEncryptedProperties_SaveValuesAndRoundTrip()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var services = new ServiceCollection();
+        services.AddEncryptedPropertiesForTesting();
+        services.AddDbContext<NullableSupportedDbContext>((sp, builder) =>
+        {
+            builder.UseInMemoryDatabase(dbName);
+            builder.UseEncryptedPropertiesForTesting(sp);
+        });
+
+        await using var provider = services.BuildServiceProvider();
+        var id = Guid.NewGuid();
+        var token = new byte[] { 1, 2, 3 };
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<NullableSupportedDbContext>();
+            context.Entities.Add(new NullableSupportedEntity
+            {
+                Id = id,
+                Email = "nullable@example.com",
+                Score = 42,
+                Token = token,
+                FavoriteDay = DayOfWeek.Wednesday
+            });
+            await context.SaveChangesAsync();
+        }
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<NullableSupportedDbContext>();
+            var entity = await context.Entities.FindAsync(id);
+
+            Assert.NotNull(entity);
+            Assert.Equal("nullable@example.com", entity!.Email);
+            Assert.Equal(42, entity.Score);
+            Assert.Equal(token, entity.Token);
+            Assert.Equal(DayOfWeek.Wednesday, entity.FavoriteDay);
         }
     }
 

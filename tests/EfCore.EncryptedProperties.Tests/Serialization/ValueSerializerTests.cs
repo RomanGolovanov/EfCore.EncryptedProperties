@@ -1,3 +1,5 @@
+using System.Text;
+using EfCore.EncryptedProperties.Configuration;
 using EfCore.EncryptedProperties.Serialization;
 
 namespace EfCore.EncryptedProperties.Tests.Serialization;
@@ -173,5 +175,32 @@ public class ValueSerializerTests
         var bytes = _serializer.Serialize(value, typeof(DayOfWeek?));
         var result = _serializer.Deserialize(bytes, typeof(DayOfWeek?));
         Assert.Equal(value, result);
+    }
+
+    [Fact]
+    public void RoundTrip_CustomRegisteredType()
+    {
+        var options = new EncryptedPropertiesOptions();
+        options.SetValueSerializer(new UriValueSerializer());
+        var serializer = new ValueSerializer(options);
+        var value = new Uri("https://example.com/private");
+
+        var bytes = serializer.Serialize(value, typeof(Uri));
+        var result = serializer.Deserialize(bytes, typeof(Uri));
+
+        Assert.Equal(value, result);
+    }
+
+    private sealed class UriValueSerializer : IEncryptedPropertyValueSerializer<Uri>
+    {
+        public byte[] Serialize(Uri value)
+        {
+            return Encoding.UTF8.GetBytes(value.ToString());
+        }
+
+        public Uri Deserialize(byte[] data)
+        {
+            return new Uri(Encoding.UTF8.GetString(data), UriKind.Absolute);
+        }
     }
 }

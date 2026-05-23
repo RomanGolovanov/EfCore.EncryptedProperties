@@ -1,11 +1,24 @@
 using System.Buffers.Binary;
 using System.Text;
 using EfCore.EncryptedProperties.Abstractions;
+using EfCore.EncryptedProperties.Configuration;
 
 namespace EfCore.EncryptedProperties.Serialization;
 
 internal sealed class ValueSerializer : IValueSerializer
 {
+    private readonly EncryptedPropertiesOptions _options;
+
+    public ValueSerializer()
+        : this(new EncryptedPropertiesOptions())
+    {
+    }
+
+    public ValueSerializer(EncryptedPropertiesOptions options)
+    {
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+    }
+
     public byte[] Serialize(object? value, Type type)
     {
         var underlyingType = Nullable.GetUnderlyingType(type);
@@ -53,7 +66,7 @@ internal sealed class ValueSerializer : IValueSerializer
         return DeserializeCore(data, type);
     }
 
-    private static byte[] SerializeCore(object value, Type type)
+    private byte[] SerializeCore(object value, Type type)
     {
         if (type == typeof(string))
             return Encoding.UTF8.GetBytes((string)value);
@@ -154,10 +167,13 @@ internal sealed class ValueSerializer : IValueSerializer
         if (type == typeof(Guid))
             return ((Guid)value).ToByteArray();
 
+        if (_options.TryGetValueSerializer(type, out var serializer))
+            return serializer.Serialize(value);
+
         throw new NotSupportedException($"Type '{type}' is not supported for encryption.");
     }
 
-    private static object DeserializeCore(byte[] data, Type type)
+    private object? DeserializeCore(byte[] data, Type type)
     {
         if (type == typeof(string))
             return Encoding.UTF8.GetString(data);
@@ -218,6 +234,9 @@ internal sealed class ValueSerializer : IValueSerializer
 
         if (type == typeof(Guid))
             return new Guid(data);
+
+        if (_options.TryGetValueSerializer(type, out var serializer))
+            return serializer.Deserialize(data);
 
         throw new NotSupportedException($"Type '{type}' is not supported for encryption.");
     }

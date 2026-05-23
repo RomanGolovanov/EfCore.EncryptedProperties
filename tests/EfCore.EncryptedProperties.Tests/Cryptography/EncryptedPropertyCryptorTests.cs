@@ -81,6 +81,22 @@ public class EncryptedPropertyCryptorTests
     }
 
     [Fact]
+    public async Task EncryptDecrypt_NullableValue_UsesDeclaredPlaintextType()
+    {
+        int? value = 42;
+        var context = new EncryptedPropertyContext
+        {
+            Purpose = "test",
+            PlaintextType = typeof(int?)
+        };
+
+        var encrypted = await _cryptor.EncryptAsync(value, context);
+        var decrypted = await _cryptor.DecryptAsync(encrypted, typeof(int?), context);
+
+        Assert.Equal(value, decrypted);
+    }
+
+    [Fact]
     public async Task Encrypt_Null_ReturnsNull()
     {
         var encrypted = await _cryptor.EncryptAsync(null, _context);

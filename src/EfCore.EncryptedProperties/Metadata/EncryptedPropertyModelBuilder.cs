@@ -46,7 +46,8 @@ internal static class EncryptedPropertyModelBuilder
                     {
                         Purpose = purpose,
                         EntityTypeName = entityType.ClrType.FullName!,
-                        PropertyName = propertyName
+                        PropertyName = propertyName,
+                        PlaintextType = innerType
                     },
                     DefaultValue = GetDefaultValue(innerType),
                     Accessors = EncryptedPropertyAccessors.Create(entityType.ClrType, propertyName, mode)

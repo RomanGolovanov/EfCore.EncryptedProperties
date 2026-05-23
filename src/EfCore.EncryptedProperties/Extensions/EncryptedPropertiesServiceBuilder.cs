@@ -324,6 +324,16 @@ public sealed class EncryptedPropertiesServiceBuilder
         return this;
     }
 
+    public EncryptedPropertiesServiceBuilder WithValueSerializer<TValue>(
+        IEncryptedPropertyValueSerializer<TValue> serializer)
+    {
+        ArgumentNullException.ThrowIfNull(serializer);
+
+        ValidateCustomValueSerializerType(typeof(TValue));
+        _options.SetValueSerializer(serializer);
+        return this;
+    }
+
     internal void Validate()
     {
         if (!_rsaKeyProviderConfigured)
@@ -346,5 +356,32 @@ public sealed class EncryptedPropertiesServiceBuilder
     {
         if (string.IsNullOrWhiteSpace(value))
             throw new ArgumentException("Value cannot be null or whitespace.", nameof(value));
+    }
+
+    private static void ValidateCustomValueSerializerType(Type type)
+    {
+        var nullableType = Nullable.GetUnderlyingType(type);
+        if (nullableType is not null)
+        {
+            throw new ArgumentException(
+                $"Custom encrypted property value serializer type '{GetTypeDisplayName(type)}' cannot be nullable. Register a serializer for '{GetTypeDisplayName(nullableType)}' instead.");
+        }
+
+        if (EncryptedPropertyTypeSupport.IsEncryptedValueType(type))
+        {
+            throw new ArgumentException(
+                $"Custom encrypted property value serializers target plaintext types. Register a serializer for the inner plaintext type instead of '{GetTypeDisplayName(type)}'.");
+        }
+
+        if (EncryptedPropertyTypeSupport.IsBuiltInPlaintextType(type))
+        {
+            throw new ArgumentException(
+                $"Built-in encrypted property type '{GetTypeDisplayName(type)}' cannot be overridden by a custom value serializer.");
+        }
+    }
+
+    private static string GetTypeDisplayName(Type type)
+    {
+        return type.FullName ?? type.Name;
     }
 }

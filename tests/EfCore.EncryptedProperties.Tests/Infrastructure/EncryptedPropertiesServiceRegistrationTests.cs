@@ -1,12 +1,14 @@
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using Azure.Storage.Blobs;
 using EfCore.EncryptedProperties.Abstractions;
 using EfCore.EncryptedProperties.Extensions;
 using EfCore.EncryptedProperties.Infrastructure;
 using EfCore.EncryptedProperties.KeyManagement;
 using EfCore.EncryptedProperties.Providers;
+using EfCore.EncryptedProperties.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -158,6 +160,72 @@ public class EncryptedPropertiesServiceRegistrationTests
         Assert.Contains(
             provider.GetServices<IHostedService>(),
             service => service is KeyChainPreloadHostedService);
+    }
+
+    [Fact]
+    public void WithValueSerializer_NullSerializer_Throws()
+    {
+        var services = new ServiceCollection();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            services.AddEncryptedProperties(cfg => cfg.WithValueSerializer<Uri>(null!)));
+    }
+
+    [Fact]
+    public void WithValueSerializer_BuiltInType_Throws()
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            services.AddEncryptedProperties(cfg =>
+                cfg.WithValueSerializer<string>(new StringValueSerializer())));
+
+        Assert.Contains("cannot be overridden", ex.Message);
+    }
+
+    [Fact]
+    public void WithValueSerializer_NullableType_Throws()
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            services.AddEncryptedProperties(cfg =>
+                cfg.WithValueSerializer<int?>(new NullableIntValueSerializer())));
+
+        Assert.Contains("cannot be nullable", ex.Message);
+        Assert.Contains(typeof(int).FullName!, ex.Message);
+    }
+
+    [Fact]
+    public void WithValueSerializer_EncryptedValueType_Throws()
+    {
+        var services = new ServiceCollection();
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            services.AddEncryptedProperties(cfg =>
+                cfg.WithValueSerializer<EncryptedValue<string>>(new EncryptedValueStringSerializer())));
+
+        Assert.Contains("plaintext types", ex.Message);
+    }
+
+    [Fact]
+    public void WithValueSerializer_ReRegisteringSameType_ReplacesPreviousSerializer()
+    {
+        var services = new ServiceCollection();
+        services.AddEncryptedProperties(cfg =>
+        {
+            cfg.WithInMemoryRsaKeyProvider(RSA.Create(2048), "rsa-v1");
+            cfg.WithInMemoryKeyChain();
+            cfg.WithValueSerializer<Uri>(new VersionedUriValueSerializer("first"));
+            cfg.WithValueSerializer<Uri>(new VersionedUriValueSerializer("second"));
+        });
+
+        using var provider = services.BuildServiceProvider();
+        var serializer = provider.GetRequiredService<IValueSerializer>();
+
+        var bytes = serializer.Serialize(new Uri("https://example.com"), typeof(Uri));
+
+        Assert.StartsWith("second|", Encoding.UTF8.GetString(bytes), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -448,5 +516,66 @@ public class EncryptedPropertiesServiceRegistrationTests
             DateTimeOffset.UtcNow.AddYears(1));
 
         await File.WriteAllBytesAsync(path, certificate.Export(X509ContentType.Pfx, password));
+    }
+
+    private sealed class StringValueSerializer : IEncryptedPropertyValueSerializer<string>
+    {
+        public byte[] Serialize(string value)
+        {
+            return Encoding.UTF8.GetBytes(value);
+        }
+
+        public string Deserialize(byte[] data)
+        {
+            return Encoding.UTF8.GetString(data);
+        }
+    }
+
+    private sealed class NullableIntValueSerializer : IEncryptedPropertyValueSerializer<int?>
+    {
+        public byte[] Serialize(int? value)
+        {
+            return BitConverter.GetBytes(value.GetValueOrDefault());
+        }
+
+        public int? Deserialize(byte[] data)
+        {
+            return BitConverter.ToInt32(data);
+        }
+    }
+
+    private sealed class EncryptedValueStringSerializer : IEncryptedPropertyValueSerializer<EncryptedValue<string>>
+    {
+        public byte[] Serialize(EncryptedValue<string> value)
+        {
+            return [];
+        }
+
+        public EncryptedValue<string> Deserialize(byte[] data)
+        {
+            return "plaintext";
+        }
+    }
+
+    private sealed class VersionedUriValueSerializer : IEncryptedPropertyValueSerializer<Uri>
+    {
+        private readonly string _version;
+
+        public VersionedUriValueSerializer(string version)
+        {
+            _version = version;
+        }
+
+        public byte[] Serialize(Uri value)
+        {
+            return Encoding.UTF8.GetBytes($"{_version}|{value}");
+        }
+
+        public Uri Deserialize(byte[] data)
+        {
+            var serialized = Encoding.UTF8.GetString(data);
+            var separator = serialized.IndexOf('|', StringComparison.Ordinal);
+            return new Uri(serialized[(separator + 1)..], UriKind.Absolute);
+        }
     }
 }

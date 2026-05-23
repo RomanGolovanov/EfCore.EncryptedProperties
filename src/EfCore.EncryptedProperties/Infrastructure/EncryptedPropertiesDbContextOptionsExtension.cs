@@ -1,3 +1,4 @@
+using EfCore.EncryptedProperties.Configuration;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata.Conventions.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,15 +12,20 @@ internal sealed class EncryptedPropertiesDbContextOptionsExtension : IDbContextO
     public EncryptedPropertiesDbContextOptionsExtension(IServiceProvider applicationServiceProvider)
     {
         ApplicationServiceProvider = applicationServiceProvider;
+        CustomValueSerializerTypes = applicationServiceProvider
+            .GetRequiredService<EncryptedPropertiesOptions>()
+            .CustomValueSerializerTypes;
     }
 
     internal IServiceProvider ApplicationServiceProvider { get; }
+    internal IReadOnlyList<Type> CustomValueSerializerTypes { get; }
 
     public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
 
     public void ApplyServices(IServiceCollection services)
     {
-        services.AddSingleton<IConventionSetPlugin, EncryptedPropertiesConventionSetPlugin>();
+        services.AddSingleton<IConventionSetPlugin>(
+            new EncryptedPropertiesConventionSetPlugin(CustomValueSerializerTypes));
         services.AddScoped<EncryptedPropertyStateTracker>();
     }
 
@@ -29,22 +35,35 @@ internal sealed class EncryptedPropertiesDbContextOptionsExtension : IDbContextO
 
     private sealed class ExtensionInfo : DbContextOptionsExtensionInfo
     {
-        public ExtensionInfo(IDbContextOptionsExtension extension) : base(extension)
+        private readonly EncryptedPropertiesDbContextOptionsExtension _extension;
+
+        public ExtensionInfo(EncryptedPropertiesDbContextOptionsExtension extension) : base(extension)
         {
+            _extension = extension;
         }
 
         public override bool IsDatabaseProvider => false;
         public override string LogFragment => "using EncryptedProperties ";
 
         public override int GetServiceProviderHashCode()
-            => 0;
+        {
+            var hash = new HashCode();
+            foreach (var type in _extension.CustomValueSerializerTypes)
+                hash.Add(type.AssemblyQualifiedName, StringComparer.Ordinal);
+
+            return hash.ToHashCode();
+        }
 
         public override bool ShouldUseSameServiceProvider(DbContextOptionsExtensionInfo other)
-            => other is ExtensionInfo;
+            => other is ExtensionInfo otherInfo
+                && _extension.CustomValueSerializerTypes.SequenceEqual(otherInfo._extension.CustomValueSerializerTypes);
 
         public override void PopulateDebugInfo(IDictionary<string, string> debugInfo)
         {
             debugInfo["EncryptedProperties:Enabled"] = "true";
+            debugInfo["EncryptedProperties:CustomValueSerializers"] = string.Join(
+                ",",
+                _extension.CustomValueSerializerTypes.Select(type => type.AssemblyQualifiedName));
         }
     }
 }
