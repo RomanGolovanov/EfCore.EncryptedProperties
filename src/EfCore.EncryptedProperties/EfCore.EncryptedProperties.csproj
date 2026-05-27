@@ -15,7 +15,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Changes since 1.0.4:&#10;- Added custom encrypted-property value serializer support via `IEncryptedPropertyValueSerializer&lt;T&gt;`.&#10;- Added operator-invoked KEK rewrap for RSA master-key rotation via `IKeyChainRewrapper`, including dry-run and filtering options.&#10;- Added `IRewrappableKeyChainStorage` and compare-and-swap KEK replacement support for in-memory, file, database, and Azure Blob key-chain storages.&#10;- Added KEK rewrap logging events, integration coverage for post-rewrap decryptability, and updated key-rotation documentation.</PackageReleaseNotes>
+    <PackageReleaseNotes>Changes since 1.0.4:&#10;- Added custom encrypted-property value serializer support via `IEncryptedPropertyValueSerializer&lt;T&gt;`.&#10;- Added operator-invoked KEK rewrap for RSA master-key rotation via `IKeyChainRewrapper`, including dry-run and filtering options.&#10;</PackageReleaseNotes>
     <PackageOutputPath>$(MSBuildProjectDirectory)/../../artifacts/packages</PackageOutputPath>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
