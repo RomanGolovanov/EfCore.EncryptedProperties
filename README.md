@@ -277,6 +277,29 @@ services.AddEncryptedProperties(cfg => cfg
 
 New writes use the current active KEK for the property's purpose. When key-chain rotation creates a new KEK, it is wrapped with the key ring's `CurrentKeyId`; existing KEKs remain readable through their stored RSA key IDs.
 
+To rewrap existing KEKs after an RSA master-key rotation, configure the provider with both the old and new RSA keys, set the new key as current, then run a dry run before writing changes:
+
+```csharp
+using EfCore.EncryptedProperties.Abstractions;
+using EfCore.EncryptedProperties.KeyManagement;
+using Microsoft.Extensions.DependencyInjection;
+
+var rewrapper = serviceProvider.GetRequiredService<IKeyChainRewrapper>();
+
+var dryRun = await rewrapper.RewrapAsync(new KeyChainRewrapOptions
+{
+    OldRsaKeyId = "rsa-v1",
+    DryRun = true
+});
+
+var result = await rewrapper.RewrapAsync(new KeyChainRewrapOptions
+{
+    OldRsaKeyId = "rsa-v1"
+});
+```
+
+Rewrap updates only key-chain records. It preserves KEK IDs, so encrypted entity rows do not need to be rewritten. After rewrap, verify startup preload and encrypted reads with only the new RSA key configured. Remove old RSA material only after no key-chain records reference it.
+
 ### Startup KEK Preload
 
 ```csharp
@@ -358,11 +381,11 @@ The key-chain table enforces one active KEK per purpose with a filtered unique i
 
 Keep the RSA key stable. If the file key is deleted, replaced, or a different Key Vault key is configured, previously stored key-chain records may no longer unwrap.
 
-For local RSA master-key rotation, use `WithFileRsaKeyRingProvider`, add the new PEM file under a new key ID, set `CurrentKeyId` to that new ID, and keep older `AddKey` entries while any `EncryptedPropertyKeks.RsaKeyId` values still reference them.
+For local RSA master-key rotation, use `WithFileRsaKeyRingProvider`, add the new PEM file under a new key ID, set `CurrentKeyId` to that new ID, and keep older `AddKey` entries until KEK rewrap has completed and no `EncryptedPropertyKeks.RsaKeyId` values reference them.
 
-For the OS certificate store provider, rotate RSA wrapping keys by provisioning a new certificate with a private key, deploying its thumbprint as `CurrentCertificateThumbprint`, and allowing KEK rotation to create new active KEKs. Keep previous certificates available for decrypt and startup preload until no `EncryptedPropertyKeks.RsaKeyId` values reference their thumbprints.
+For the OS certificate store provider, rotate RSA wrapping keys by provisioning a new certificate with a private key, deploying its thumbprint as `CurrentCertificateThumbprint`, and running KEK rewrap. Keep previous certificates available for decrypt and startup preload until no `EncryptedPropertyKeks.RsaKeyId` values reference their thumbprints.
 
-The library rotates data-encryption keys, but it does not automatically rotate the RSA master key.
+The library rotates data-encryption keys and can manually rewrap stored KEKs, but it does not automatically mutate RSA master-key wrapping on startup.
 
 ### Plaintext Change Tracking
 

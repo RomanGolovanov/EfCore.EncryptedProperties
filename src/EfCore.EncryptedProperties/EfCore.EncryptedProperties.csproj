@@ -6,16 +6,16 @@
     <RootNamespace>EfCore.EncryptedProperties</RootNamespace>
     <PackageId>EfCore.EncryptedProperties</PackageId>
     <Title>EF Core Encrypted Properties</Title>
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <Authors>RomanGolovanov</Authors>
     <Description>Property-level encryption for Entity Framework Core using AES-GCM data encryption keys and RSA-wrapped key encryption keys.</Description>
-    <PackageTags>entity-framework-core;ef-core;encryption;aes-gcm;key-vault;privacy</PackageTags>
+    <PackageTags>entity-framework-core;ef-core;encryption;aes-gcm;rsa;key-vault;key-rotation;privacy;envelope-encryption</PackageTags>
     <PackageProjectUrl>https://github.com/RomanGolovanov/EfCore.EncryptedProperties</PackageProjectUrl>
     <RepositoryUrl>https://github.com/RomanGolovanov/EfCore.EncryptedProperties</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Changes since 1.0.2:&#10;- Added X509 certificate store RSA key provider support.&#10;- Added file-based RSA key ring providers for raw RSA keys and password-protected PFX key material.&#10;- Added file-based and Azure Blob-based key chain storage providers.&#10;- Added Azure Blob-backed RSA key ring providers for RSA and PFX key material, plus an Azurite blob sample.&#10;- Fixed EF Core many-service-providers warning by reworking `UseEncryptedProperties` interceptor/provider wiring.&#10;- Added multi-targeted package assets for .NET 8, .NET 9, and .NET 10 with matching EF Core dependency groups.</PackageReleaseNotes>
+    <PackageReleaseNotes>Changes since 1.0.4:&#10;- Added custom encrypted-property value serializer support via `IEncryptedPropertyValueSerializer&lt;T&gt;`.&#10;- Added operator-invoked KEK rewrap for RSA master-key rotation via `IKeyChainRewrapper`, including dry-run and filtering options.&#10;- Added `IRewrappableKeyChainStorage` and compare-and-swap KEK replacement support for in-memory, file, database, and Azure Blob key-chain storages.&#10;- Added KEK rewrap logging events, integration coverage for post-rewrap decryptability, and updated key-rotation documentation.</PackageReleaseNotes>
     <PackageOutputPath>$(MSBuildProjectDirectory)/../../artifacts/packages</PackageOutputPath>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

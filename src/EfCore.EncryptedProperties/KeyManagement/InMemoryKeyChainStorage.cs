@@ -3,7 +3,7 @@ using EfCore.EncryptedProperties.Abstractions;
 
 namespace EfCore.EncryptedProperties.KeyManagement;
 
-public sealed class InMemoryKeyChainStorage : IKeyChainStorage
+public sealed class InMemoryKeyChainStorage : IRewrappableKeyChainStorage
 {
     private readonly ConcurrentDictionary<string, EncryptedKeyRecord> _records = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _purposeLocks = new();
@@ -70,6 +70,28 @@ public sealed class InMemoryKeyChainStorage : IKeyChainStorage
     {
         IReadOnlyList<EncryptedKeyRecord> all = _records.Values.ToList();
         return new ValueTask<IReadOnlyList<EncryptedKeyRecord>>(all);
+    }
+
+    public ValueTask<bool> TryReplaceKeyAsync(
+        EncryptedKeyRecord original,
+        EncryptedKeyRecord replacement,
+        CancellationToken cancellationToken = default)
+    {
+        KeyChainStorageDocuments.ValidateReplacement(original, replacement);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var key = original.Id.ToString();
+        while (true)
+        {
+            if (!_records.TryGetValue(key, out var current))
+                return new ValueTask<bool>(false);
+
+            if (!KeyChainStorageDocuments.WrapMatches(current, original))
+                return new ValueTask<bool>(false);
+
+            if (_records.TryUpdate(key, replacement, current))
+                return new ValueTask<bool>(true);
+        }
     }
 
     private static bool IsActiveKeyValid(EncryptedKeyRecord record, DateTimeOffset? rotateBefore)

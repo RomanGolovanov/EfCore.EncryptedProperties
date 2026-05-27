@@ -4,7 +4,7 @@ using EfCore.EncryptedProperties.Abstractions;
 
 namespace EfCore.EncryptedProperties.KeyManagement;
 
-internal sealed class DatabaseKeyChainStorage : IKeyChainStorage
+internal sealed class DatabaseKeyChainStorage : IRewrappableKeyChainStorage
 {
     private const string ColumnList = "Id, Purpose, RsaKeyId, Algorithm, EncryptedKey, CreatedAt, IsActive";
 
@@ -143,6 +143,30 @@ internal sealed class DatabaseKeyChainStorage : IKeyChainStorage
             records.Add(MapToRecord(reader));
 
         return records;
+    }
+
+    public async ValueTask<bool> TryReplaceKeyAsync(
+        EncryptedKeyRecord original,
+        EncryptedKeyRecord replacement,
+        CancellationToken cancellationToken = default)
+    {
+        KeyChainStorageDocuments.ValidateReplacement(original, replacement);
+
+        await using var connection = await OpenSeparateConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE EncryptedPropertyKeks
+            SET RsaKeyId = @newRsaKeyId, EncryptedKey = @newEncryptedKey
+            WHERE Id = @id AND RsaKeyId = @oldRsaKeyId AND EncryptedKey = @oldEncryptedKey
+            """;
+        AddParameter(command, "@newRsaKeyId", DbType.String, replacement.RsaKeyId);
+        AddParameter(command, "@newEncryptedKey", DbType.String, replacement.EncryptedKey);
+        AddParameter(command, "@id", DbType.Guid, original.Id);
+        AddParameter(command, "@oldRsaKeyId", DbType.String, original.RsaKeyId);
+        AddParameter(command, "@oldEncryptedKey", DbType.String, original.EncryptedKey);
+
+        var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+        return affectedRows == 1;
     }
 
     private static async ValueTask InsertAsync(

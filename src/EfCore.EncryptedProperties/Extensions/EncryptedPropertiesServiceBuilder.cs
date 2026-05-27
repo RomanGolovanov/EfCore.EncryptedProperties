@@ -34,7 +34,9 @@ public static class EncryptedPropertiesServiceCollectionExtensions
 
         services.RemoveAll<EncryptedPropertiesOptions>();
         services.RemoveAll<IValueSerializer>();
+        services.RemoveAll<KeyChainManager>();
         services.RemoveAll<IKeyChainManager>();
+        services.RemoveAll<IKeyChainRewrapper>();
         services.RemoveAll<IEncryptedPropertyCryptor>();
         services.RemoveAll<EncryptedPropertyStateTracker>();
         services.RemoveAll<EncryptedPropertyModelCache>();
@@ -42,7 +44,9 @@ public static class EncryptedPropertiesServiceCollectionExtensions
         services.AddLogging();
         services.AddSingleton(options);
         services.AddSingleton<IValueSerializer, ValueSerializer>();
-        services.AddSingleton<IKeyChainManager, KeyChainManager>();
+        services.AddSingleton<KeyChainManager>();
+        services.AddSingleton<IKeyChainManager>(provider => provider.GetRequiredService<KeyChainManager>());
+        services.AddSingleton<IKeyChainRewrapper>(provider => provider.GetRequiredService<KeyChainManager>());
         services.AddSingleton<IEncryptedPropertyCryptor, EncryptedPropertyCryptor>();
         services.AddScoped<EncryptedPropertyStateTracker>();
         services.AddSingleton<EncryptedPropertyModelCache>();

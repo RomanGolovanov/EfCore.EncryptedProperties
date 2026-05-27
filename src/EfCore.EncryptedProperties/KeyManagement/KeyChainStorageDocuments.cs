@@ -113,6 +113,39 @@ internal static class KeyChainStorageDocuments
             throw new ArgumentException("Candidate key must be active.", nameof(candidate));
     }
 
+    public static void ValidateReplacement(EncryptedKeyRecord original, EncryptedKeyRecord replacement)
+    {
+        ArgumentNullException.ThrowIfNull(original);
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        if (replacement.Id != original.Id)
+            throw new ArgumentException("Replacement key ID must match the original key ID.", nameof(replacement));
+
+        if (!string.Equals(replacement.Purpose, original.Purpose, StringComparison.Ordinal))
+            throw new ArgumentException("Replacement purpose must match the original purpose.", nameof(replacement));
+
+        if (!string.Equals(replacement.Algorithm, original.Algorithm, StringComparison.Ordinal))
+            throw new ArgumentException("Replacement algorithm must match the original algorithm.", nameof(replacement));
+
+        if (replacement.CreatedAt != original.CreatedAt)
+            throw new ArgumentException("Replacement creation time must match the original creation time.", nameof(replacement));
+
+        if (replacement.IsActive != original.IsActive)
+            throw new ArgumentException("Replacement active state must match the original active state.", nameof(replacement));
+
+        if (string.IsNullOrWhiteSpace(replacement.RsaKeyId))
+            throw new ArgumentException("Replacement RSA key ID cannot be null or whitespace.", nameof(replacement));
+
+        if (string.IsNullOrWhiteSpace(replacement.EncryptedKey))
+            throw new ArgumentException("Replacement encrypted key cannot be null or whitespace.", nameof(replacement));
+    }
+
+    public static bool WrapMatches(EncryptedKeyRecord current, EncryptedKeyRecord expected)
+    {
+        return string.Equals(current.RsaKeyId, expected.RsaKeyId, StringComparison.Ordinal)
+            && string.Equals(current.EncryptedKey, expected.EncryptedKey, StringComparison.Ordinal);
+    }
+
     public static void Validate(string source, KeyChainDocument document)
     {
         if (document.FormatVersion != CurrentFormatVersion)

@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace EfCore.EncryptedProperties.KeyManagement;
 
-internal sealed class KeyChainManager : IKeyChainManager
+internal sealed class KeyChainManager : IKeyChainManager, IKeyChainRewrapper
 {
     private readonly IKeyChainStorage _storage;
     private readonly IRsaKeyProvider _rsaKeyProvider;
@@ -145,6 +145,139 @@ internal sealed class KeyChainManager : IKeyChainManager
         }
     }
 
+    public async ValueTask<KeyChainRewrapResult> RewrapAsync(
+        KeyChainRewrapOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        options ??= new KeyChainRewrapOptions();
+        ValidateRewrapOptions(options);
+
+        var rewrappableStorage = _storage as IRewrappableKeyChainStorage;
+        if (!options.DryRun && rewrappableStorage is null)
+        {
+            throw new InvalidOperationException(
+                $"The configured key chain storage '{_storage.GetType().FullName}' does not support KEK rewrap. Implement {nameof(IRewrappableKeyChainStorage)} to enable rewrap writes.");
+        }
+
+        var records = await _storage.GetAllAsync(cancellationToken);
+        var auditRecords = new List<KeyChainRewrapRecord>();
+        var eligibleCount = 0;
+        var rewrappedCount = 0;
+        var alreadyCurrentCount = 0;
+        var wouldRewrapCount = 0;
+
+        foreach (var record in records
+                     .OrderBy(record => record.Purpose, StringComparer.Ordinal)
+                     .ThenBy(record => record.CreatedAt)
+                     .ThenBy(record => record.Id))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (options.Purpose is not null
+                && !string.Equals(record.Purpose, options.Purpose, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (options.OldRsaKeyId is not null
+                && !string.Equals(record.RsaKeyId, options.OldRsaKeyId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            eligibleCount++;
+            var rawKey = Array.Empty<byte>();
+
+            try
+            {
+                var encryptedBytes = Base64Url.Decode(record.EncryptedKey);
+                rawKey = await _rsaKeyProvider.UnwrapKeyAsync(
+                    encryptedBytes,
+                    record.RsaKeyId,
+                    cancellationToken);
+                var wrappedKey = await _rsaKeyProvider.WrapKeyAsync(rawKey, cancellationToken);
+
+                if (string.Equals(wrappedKey.RsaKeyId, record.RsaKeyId, StringComparison.Ordinal))
+                {
+                    alreadyCurrentCount++;
+                    auditRecords.Add(CreateRewrapRecord(
+                        record,
+                        wrappedKey.RsaKeyId,
+                        KeyChainRewrapStatus.AlreadyCurrent));
+                    continue;
+                }
+
+                if (options.DryRun)
+                {
+                    wouldRewrapCount++;
+                    auditRecords.Add(CreateRewrapRecord(
+                        record,
+                        wrappedKey.RsaKeyId,
+                        KeyChainRewrapStatus.WouldRewrap));
+                    continue;
+                }
+
+                var replacement = new EncryptedKeyRecord
+                {
+                    Id = record.Id,
+                    Purpose = record.Purpose,
+                    RsaKeyId = wrappedKey.RsaKeyId,
+                    Algorithm = record.Algorithm,
+                    EncryptedKey = Base64Url.Encode(wrappedKey.Ciphertext),
+                    CreatedAt = record.CreatedAt,
+                    IsActive = record.IsActive
+                };
+
+                var replaced = await rewrappableStorage!.TryReplaceKeyAsync(
+                    record,
+                    replacement,
+                    cancellationToken);
+
+                if (!replaced)
+                {
+                    if (await IsAlreadyRewrappedAsync(record, wrappedKey.RsaKeyId, cancellationToken))
+                    {
+                        alreadyCurrentCount++;
+                        auditRecords.Add(CreateRewrapRecord(
+                            record,
+                            wrappedKey.RsaKeyId,
+                            KeyChainRewrapStatus.AlreadyCurrent));
+                        continue;
+                    }
+
+                    throw new InvalidOperationException(
+                        $"KEK '{record.Id}' for purpose '{record.Purpose}' changed during rewrap. Rerun the operation to process the latest key-chain state.");
+                }
+
+                rewrappedCount++;
+                auditRecords.Add(CreateRewrapRecord(
+                    record,
+                    wrappedKey.RsaKeyId,
+                    KeyChainRewrapStatus.Rewrapped));
+                LogKeyRewrapped(record, replacement);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogKeyRewrapFailed(record, ex);
+                throw;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(rawKey);
+            }
+        }
+
+        return new KeyChainRewrapResult
+        {
+            ScannedCount = records.Count,
+            EligibleCount = eligibleCount,
+            RewrappedCount = rewrappedCount,
+            AlreadyCurrentCount = alreadyCurrentCount,
+            WouldRewrapCount = wouldRewrapCount,
+            Records = auditRecords.ToArray()
+        };
+    }
+
     private async ValueTask<(EncryptedKeyRecord Record, byte[] RawKey)> CreateCandidateKekAsync(
         string purpose,
         CancellationToken cancellationToken)
@@ -226,6 +359,63 @@ internal sealed class KeyChainManager : IKeyChainManager
             newRecord.RsaKeyId,
             oldRecord.CreatedAt,
             newRecord.CreatedAt);
+    }
+
+    private void LogKeyRewrapped(EncryptedKeyRecord oldRecord, EncryptedKeyRecord newRecord)
+    {
+        _logger.LogInformation(
+            EncryptedPropertiesEventIds.KeyRewrapped,
+            "Rewrapped encrypted property KEK {KeyId} for purpose {Purpose} from RSA key {OldRsaKeyId} to RSA key {NewRsaKeyId}.",
+            oldRecord.Id,
+            oldRecord.Purpose,
+            oldRecord.RsaKeyId,
+            newRecord.RsaKeyId);
+    }
+
+    private void LogKeyRewrapFailed(EncryptedKeyRecord record, Exception exception)
+    {
+        _logger.LogError(
+            EncryptedPropertiesEventIds.KeyRewrapFailed,
+            exception,
+            "Failed to rewrap encrypted property KEK {KeyId} for purpose {Purpose} using RSA key {RsaKeyId}.",
+            record.Id,
+            record.Purpose,
+            record.RsaKeyId);
+    }
+
+    private async ValueTask<bool> IsAlreadyRewrappedAsync(
+        EncryptedKeyRecord original,
+        string newRsaKeyId,
+        CancellationToken cancellationToken)
+    {
+        var current = await _storage.GetByIdAsync(original.Id.ToString(), cancellationToken);
+        return current is not null
+            && string.Equals(current.RsaKeyId, newRsaKeyId, StringComparison.Ordinal);
+    }
+
+    private static KeyChainRewrapRecord CreateRewrapRecord(
+        EncryptedKeyRecord record,
+        string newRsaKeyId,
+        KeyChainRewrapStatus status)
+    {
+        return new KeyChainRewrapRecord
+        {
+            KeyId = record.Id,
+            Purpose = record.Purpose,
+            OldRsaKeyId = record.RsaKeyId,
+            NewRsaKeyId = newRsaKeyId,
+            IsActive = record.IsActive,
+            Status = status
+        };
+    }
+
+    private static void ValidateRewrapOptions(KeyChainRewrapOptions options)
+    {
+        if (options.Purpose is not null && string.IsNullOrWhiteSpace(options.Purpose))
+            throw new ArgumentException("Purpose cannot be empty or whitespace.", nameof(options));
+
+        if (options.OldRsaKeyId is not null && string.IsNullOrWhiteSpace(options.OldRsaKeyId))
+            throw new ArgumentException("Old RSA key ID cannot be empty or whitespace.", nameof(options));
     }
 
     private bool TryGetCached(string key, out KeyMaterial? material)

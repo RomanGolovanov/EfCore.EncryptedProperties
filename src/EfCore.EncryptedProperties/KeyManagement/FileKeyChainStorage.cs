@@ -2,7 +2,7 @@ using EfCore.EncryptedProperties.Abstractions;
 
 namespace EfCore.EncryptedProperties.KeyManagement;
 
-public sealed class FileKeyChainStorage : IKeyChainStorage
+public sealed class FileKeyChainStorage : IRewrappableKeyChainStorage
 {
     private const string PurposeFilePrefix = "purpose-";
     private const string PurposeFileExtension = ".json";
@@ -91,6 +91,31 @@ public sealed class FileKeyChainStorage : IKeyChainStorage
             .OrderBy(record => record.Purpose, StringComparer.Ordinal)
             .ThenBy(record => record.CreatedAt)
             .ToList();
+    }
+
+    public async ValueTask<bool> TryReplaceKeyAsync(
+        EncryptedKeyRecord original,
+        EncryptedKeyRecord replacement,
+        CancellationToken cancellationToken = default)
+    {
+        KeyChainStorageDocuments.ValidateReplacement(original, replacement);
+
+        await using var purposeLock = await AcquirePurposeLockAsync(original.Purpose, cancellationToken);
+        var document = await ReadPurposeDocumentAsync(original.Purpose, cancellationToken);
+        var key = document.Keys!.FirstOrDefault(key => key.Id == original.Id);
+
+        if (key is null
+            || !string.Equals(key.RsaKeyId, original.RsaKeyId, StringComparison.Ordinal)
+            || !string.Equals(key.EncryptedKey, original.EncryptedKey, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        key.RsaKeyId = replacement.RsaKeyId;
+        key.EncryptedKey = replacement.EncryptedKey;
+
+        await WriteDocumentAsync(document, cancellationToken);
+        return true;
     }
 
     private async ValueTask<KeyChainDocument> ReadPurposeDocumentAsync(

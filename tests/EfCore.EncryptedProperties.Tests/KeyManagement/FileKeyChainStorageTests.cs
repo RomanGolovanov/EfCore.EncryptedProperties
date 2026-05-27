@@ -116,6 +116,42 @@ public sealed class FileKeyChainStorageTests
     }
 
     [Fact]
+    public async Task TryReplaceKeyAsync_UpdatesMatchingRecordOnly()
+    {
+        var directory = CreateTempDirectory();
+
+        try
+        {
+            var storage = new FileKeyChainStorage(directory);
+            var original = CreateRecord("default", "old");
+            await storage.GetOrActivateAsync("default", rotateBefore: null, original);
+
+            var replacement = CreateReplacement(original);
+            var replaced = await storage.TryReplaceKeyAsync(original, replacement);
+
+            Assert.True(replaced);
+            var reloadedStorage = new FileKeyChainStorage(directory);
+            var current = Assert.Single(await reloadedStorage.GetAllAsync());
+            Assert.Equal(original.Id, current.Id);
+            Assert.Equal("rsa-v2", current.RsaKeyId);
+            Assert.Equal("new", current.EncryptedKey);
+            Assert.Equal(original.IsActive, current.IsActive);
+
+            var staleReplacement = CreateReplacement(original, "rsa-v3", "newer");
+            var staleReplaced = await storage.TryReplaceKeyAsync(original, staleReplacement);
+
+            Assert.False(staleReplaced);
+            current = Assert.Single(await reloadedStorage.GetAllAsync());
+            Assert.Equal("rsa-v2", current.RsaKeyId);
+            Assert.Equal("new", current.EncryptedKey);
+        }
+        finally
+        {
+            DeleteDirectory(directory);
+        }
+    }
+
+    [Fact]
     public void Constructor_MissingDirectoryPath_Throws()
     {
         Assert.Throws<ArgumentException>(() => new FileKeyChainStorage(" "));
@@ -135,6 +171,23 @@ public sealed class FileKeyChainStorageTests
             EncryptedKey = encryptedKey,
             CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             IsActive = true
+        };
+    }
+
+    private static EncryptedKeyRecord CreateReplacement(
+        EncryptedKeyRecord original,
+        string rsaKeyId = "rsa-v2",
+        string encryptedKey = "new")
+    {
+        return new EncryptedKeyRecord
+        {
+            Id = original.Id,
+            Purpose = original.Purpose,
+            RsaKeyId = rsaKeyId,
+            Algorithm = original.Algorithm,
+            EncryptedKey = encryptedKey,
+            CreatedAt = original.CreatedAt,
+            IsActive = original.IsActive
         };
     }
 

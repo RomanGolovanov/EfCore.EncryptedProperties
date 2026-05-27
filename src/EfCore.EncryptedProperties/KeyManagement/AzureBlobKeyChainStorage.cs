@@ -5,7 +5,7 @@ using EfCore.EncryptedProperties.Abstractions;
 
 namespace EfCore.EncryptedProperties.KeyManagement;
 
-public sealed class AzureBlobKeyChainStorage : IKeyChainStorage
+public sealed class AzureBlobKeyChainStorage : IRewrappableKeyChainStorage
 {
     private const string PurposeBlobPrefix = "purpose-";
     private const string PurposeBlobExtension = ".json";
@@ -126,6 +126,47 @@ public sealed class AzureBlobKeyChainStorage : IKeyChainStorage
             .OrderBy(record => record.Purpose, StringComparer.Ordinal)
             .ThenBy(record => record.CreatedAt)
             .ToList();
+    }
+
+    public async ValueTask<bool> TryReplaceKeyAsync(
+        EncryptedKeyRecord original,
+        EncryptedKeyRecord replacement,
+        CancellationToken cancellationToken = default)
+    {
+        KeyChainStorageDocuments.ValidateReplacement(original, replacement);
+        await EnsureContainerAsync(cancellationToken);
+
+        for (var attempt = 0; attempt < _maxWriteAttempts; attempt++)
+        {
+            var state = await ReadPurposeDocumentAsync(original.Purpose, cancellationToken);
+            if (state is null)
+                return false;
+
+            var key = state.Document.Keys!.FirstOrDefault(key => key.Id == original.Id);
+            if (key is null
+                || !string.Equals(key.RsaKeyId, original.RsaKeyId, StringComparison.Ordinal)
+                || !string.Equals(key.EncryptedKey, original.EncryptedKey, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            key.RsaKeyId = replacement.RsaKeyId;
+            key.EncryptedKey = replacement.EncryptedKey;
+
+            try
+            {
+                await WritePurposeDocumentAsync(state.Document, state.ETag, cancellationToken);
+                return true;
+            }
+            catch (RequestFailedException ex) when (IsRetryableConcurrencyFailure(ex) && attempt + 1 < _maxWriteAttempts)
+            {
+                if (_retryDelay > TimeSpan.Zero)
+                    await Task.Delay(_retryDelay, cancellationToken);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Could not replace key chain KEK '{original.Id}' for purpose '{original.Purpose}' after {_maxWriteAttempts} blob write attempts.");
     }
 
     private async ValueTask<BlobPurposeDocumentState?> ReadPurposeDocumentAsync(

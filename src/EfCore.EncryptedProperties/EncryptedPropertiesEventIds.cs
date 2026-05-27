@@ -10,4 +10,6 @@ public static class EncryptedPropertiesEventIds
     public static readonly EventId DecryptionFailed = new(1003, nameof(DecryptionFailed));
     public static readonly EventId EncryptedPropertyModelDiscovered = new(1004, nameof(EncryptedPropertyModelDiscovered));
     public static readonly EventId EncryptedPropertyDiscovered = new(1005, nameof(EncryptedPropertyDiscovered));
+    public static readonly EventId KeyRewrapped = new(1006, nameof(KeyRewrapped));
+    public static readonly EventId KeyRewrapFailed = new(1007, nameof(KeyRewrapFailed));
 }

@@ -95,6 +95,64 @@ public class EncryptedPropertiesLoggingTests
     }
 
     [Fact]
+    public async Task RewrapAsync_LogsKeyRewrapped()
+    {
+        using var loggerFactory = CreateLoggerFactory(out var loggerProvider);
+        using var rsaV1 = RSA.Create(2048);
+        using var rsaV2 = RSA.Create(2048);
+        var storage = new InMemoryKeyChainStorage();
+        var sourceManager = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v1", ("rsa-v1", rsaV1)),
+            new EncryptedPropertiesOptions());
+        var key = await sourceManager.GetActiveKeyAsync("default");
+
+        var manager = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v2", ("rsa-v1", rsaV1), ("rsa-v2", rsaV2)),
+            new EncryptedPropertiesOptions(),
+            loggerFactory.CreateLogger<KeyChainManager>());
+
+        await manager.RewrapAsync();
+
+        var entry = Assert.Single(loggerProvider.Find(EncryptedPropertiesEventIds.KeyRewrapped));
+        Assert.Equal(LogLevel.Information, entry.LogLevel);
+        Assert.Equal("default", entry.GetValue<string>("Purpose"));
+        Assert.Equal(key.KeyId, entry.GetValue<Guid>("KeyId").ToString());
+        Assert.Equal("rsa-v1", entry.GetValue<string>("OldRsaKeyId"));
+        Assert.Equal("rsa-v2", entry.GetValue<string>("NewRsaKeyId"));
+        AssertNoKeyMaterial(entry, key.Key);
+    }
+
+    [Fact]
+    public async Task RewrapAsync_LogsFailureAndRethrows()
+    {
+        using var loggerFactory = CreateLoggerFactory(out var loggerProvider);
+        using var rsa = RSA.Create(2048);
+        var storage = new InMemoryKeyChainStorage();
+        var sourceManager = new KeyChainManager(
+            storage,
+            new InMemoryRsaKeyProvider(rsa, "rsa-v1"),
+            new EncryptedPropertiesOptions());
+        var key = await sourceManager.GetActiveKeyAsync("default");
+
+        var manager = new KeyChainManager(
+            storage,
+            new FailingUnwrapRsaKeyProvider(),
+            new EncryptedPropertiesOptions(),
+            loggerFactory.CreateLogger<KeyChainManager>());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => manager.RewrapAsync().AsTask());
+        Assert.Contains("unwrap failed", ex.Message);
+
+        var entry = Assert.Single(loggerProvider.Find(EncryptedPropertiesEventIds.KeyRewrapFailed));
+        Assert.Equal(LogLevel.Error, entry.LogLevel);
+        Assert.Equal("default", entry.GetValue<string>("Purpose"));
+        Assert.Equal(key.KeyId, entry.GetValue<Guid>("KeyId").ToString());
+        Assert.Equal("rsa-v1", entry.GetValue<string>("RsaKeyId"));
+    }
+
+    [Fact]
     public async Task DecryptAsync_LogsFailureWithoutPayload()
     {
         using var loggerFactory = CreateLoggerFactory(out var loggerProvider);
@@ -227,6 +285,41 @@ public class EncryptedPropertiesLoggingTests
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("unwrap failed");
+        }
+    }
+
+    private sealed class TestRsaKeyRingProvider : IRsaKeyProvider
+    {
+        private readonly Dictionary<string, RSA> _keys;
+
+        public TestRsaKeyRingProvider(string currentKeyId, params (string KeyId, RSA Rsa)[] keys)
+        {
+            KeyId = currentKeyId;
+            _keys = keys.ToDictionary(key => key.KeyId, key => key.Rsa, StringComparer.Ordinal);
+        }
+
+        public string KeyId { get; }
+        public string Algorithm => "RSA-OAEP-256";
+
+        public ValueTask<RsaKeyWrapResult> WrapKeyAsync(
+            byte[] plaintext,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var ciphertext = _keys[KeyId].Encrypt(plaintext, RSAEncryptionPadding.OaepSHA256);
+            return new ValueTask<RsaKeyWrapResult>(new RsaKeyWrapResult(ciphertext, KeyId, Algorithm));
+        }
+
+        public ValueTask<byte[]> UnwrapKeyAsync(
+            byte[] ciphertext,
+            string rsaKeyId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_keys.TryGetValue(rsaKeyId, out var rsa))
+                throw new InvalidOperationException($"RSA key '{rsaKeyId}' is not configured.");
+
+            return new ValueTask<byte[]>(rsa.Decrypt(ciphertext, RSAEncryptionPadding.OaepSHA256));
         }
     }
 }

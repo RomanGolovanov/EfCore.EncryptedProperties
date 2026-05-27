@@ -166,6 +166,73 @@ public class RotationTests
         }
     }
 
+    [Fact]
+    public async Task FileKeyRing_Rewrap_AllowsRemovingOldRsaKey()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        try
+        {
+            var dbName = Guid.NewGuid().ToString();
+            var dbRoot = new InMemoryDatabaseRoot();
+            var storage = new InMemoryKeyChainStorage();
+            var v1Path = Path.Combine(tempDir, "rsa-v1.pem");
+            var v2Path = Path.Combine(tempDir, "rsa-v2.pem");
+            var id = Guid.NewGuid();
+
+            await using (var provider = CreateFileKeyRingProvider(
+                dbName,
+                dbRoot,
+                storage,
+                "rsa-v1",
+                ("rsa-v1", v1Path)))
+            {
+                await using var scope = provider.CreateAsyncScope();
+                var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+                ctx.Customers.Add(new CustomerDecryptOnRead
+                {
+                    Id = id,
+                    Email = "first@example.com",
+                    Name = "First"
+                });
+                await ctx.SaveChangesAsync();
+            }
+
+            await using (var provider = CreateFileKeyRingProvider(
+                dbName,
+                dbRoot,
+                storage,
+                "rsa-v2",
+                ("rsa-v1", v1Path),
+                ("rsa-v2", v2Path)))
+            {
+                var result = await provider.GetRequiredService<IKeyChainRewrapper>().RewrapAsync();
+                Assert.Equal(1, result.RewrappedCount);
+            }
+
+            var records = await storage.GetAllAsync();
+            Assert.Single(records, record => record.RsaKeyId == "rsa-v2");
+
+            await using (var provider = CreateFileKeyRingProvider(
+                dbName,
+                dbRoot,
+                storage,
+                "rsa-v2",
+                ("rsa-v2", v2Path)))
+            {
+                await using var scope = provider.CreateAsyncScope();
+                var ctx = scope.ServiceProvider.GetRequiredService<TestDbContext>();
+                var customer = await ctx.Customers.FindAsync(id);
+
+                Assert.Equal("first@example.com", customer!.Email);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
     private static ServiceProvider CreateProvider(
         RSA rsa,
         Action<EncryptedPropertiesServiceBuilder>? configure = null)

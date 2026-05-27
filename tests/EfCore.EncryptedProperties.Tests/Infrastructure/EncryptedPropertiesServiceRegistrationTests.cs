@@ -41,6 +41,12 @@ public class EncryptedPropertiesServiceRegistrationTests
             scope1.ServiceProvider.GetRequiredService<IKeyChainManager>(),
             scope2.ServiceProvider.GetRequiredService<IKeyChainManager>());
         Assert.Same(
+            scope1.ServiceProvider.GetRequiredService<IKeyChainRewrapper>(),
+            scope2.ServiceProvider.GetRequiredService<IKeyChainRewrapper>());
+        Assert.Same(
+            scope1.ServiceProvider.GetRequiredService<IKeyChainManager>(),
+            scope1.ServiceProvider.GetRequiredService<IKeyChainRewrapper>());
+        Assert.Same(
             scope1.ServiceProvider.GetRequiredService<IEncryptedPropertyCryptor>(),
             scope2.ServiceProvider.GetRequiredService<IEncryptedPropertyCryptor>());
         Assert.Same(

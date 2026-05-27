@@ -129,6 +129,155 @@ public class KeyChainManagerTests
     }
 
     [Fact]
+    public async Task RewrapAsync_RewrapsExistingKekToCurrentRsaKey()
+    {
+        using var rsaV1 = RSA.Create(2048);
+        using var rsaV2 = RSA.Create(2048);
+        var storage = new InMemoryKeyChainStorage();
+        var managerV1 = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v1", ("rsa-v1", rsaV1)),
+            new EncryptedPropertiesOptions());
+        var originalKey = await managerV1.GetActiveKeyAsync("default");
+        var originalRecord = Assert.Single(await storage.GetAllAsync());
+
+        var managerV2 = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v2", ("rsa-v1", rsaV1), ("rsa-v2", rsaV2)),
+            new EncryptedPropertiesOptions());
+
+        var result = await managerV2.RewrapAsync();
+
+        Assert.Equal(1, result.ScannedCount);
+        Assert.Equal(1, result.EligibleCount);
+        Assert.Equal(1, result.RewrappedCount);
+        Assert.Equal(0, result.AlreadyCurrentCount);
+        var rewrappedRecord = Assert.Single(await storage.GetAllAsync());
+        Assert.Equal(originalRecord.Id, rewrappedRecord.Id);
+        Assert.Equal("rsa-v2", rewrappedRecord.RsaKeyId);
+        Assert.NotEqual(originalRecord.EncryptedKey, rewrappedRecord.EncryptedKey);
+
+        var managerV2Only = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v2", ("rsa-v2", rsaV2)),
+            new EncryptedPropertiesOptions());
+        var decryptedKey = await managerV2Only.GetKeyForDecryptAsync(originalKey.KeyId);
+        Assert.Equal(originalKey.Key, decryptedKey.Key);
+    }
+
+    [Fact]
+    public async Task RewrapAsync_RewrapsActiveAndInactiveKeys()
+    {
+        using var rsaV1 = RSA.Create(2048);
+        using var rsaV2 = RSA.Create(2048);
+        var storage = new InMemoryKeyChainStorage();
+        var options = new EncryptedPropertiesOptions
+        {
+            KekCacheLifetime = TimeSpan.Zero
+        };
+        options.RotationPolicy.KeyRotateAfter = TimeSpan.Zero;
+        var managerV1 = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v1", ("rsa-v1", rsaV1)),
+            options);
+
+        await managerV1.GetActiveKeyAsync("default");
+        await Task.Delay(10);
+        await managerV1.GetActiveKeyAsync("default");
+
+        var before = await storage.GetAllAsync();
+        Assert.Equal(2, before.Count);
+        Assert.Contains(before, record => !record.IsActive);
+        Assert.Contains(before, record => record.IsActive);
+
+        var managerV2 = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v2", ("rsa-v1", rsaV1), ("rsa-v2", rsaV2)),
+            new EncryptedPropertiesOptions());
+
+        var result = await managerV2.RewrapAsync();
+
+        Assert.Equal(2, result.RewrappedCount);
+        Assert.All(await storage.GetAllAsync(), record => Assert.Equal("rsa-v2", record.RsaKeyId));
+    }
+
+    [Fact]
+    public async Task RewrapAsync_HonorsPurposeOldRsaKeyAndDryRunOptions()
+    {
+        using var rsaV1 = RSA.Create(2048);
+        using var rsaV2 = RSA.Create(2048);
+        var storage = new InMemoryKeyChainStorage();
+        var managerV1 = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v1", ("rsa-v1", rsaV1)),
+            new EncryptedPropertiesOptions());
+        await managerV1.GetActiveKeyAsync("email");
+        await managerV1.GetActiveKeyAsync("notes");
+
+        var managerV2 = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v2", ("rsa-v1", rsaV1), ("rsa-v2", rsaV2)),
+            new EncryptedPropertiesOptions());
+
+        var skipped = await managerV2.RewrapAsync(new KeyChainRewrapOptions
+        {
+            Purpose = "email",
+            OldRsaKeyId = "missing-rsa",
+            DryRun = true
+        });
+        Assert.Equal(2, skipped.ScannedCount);
+        Assert.Equal(0, skipped.EligibleCount);
+
+        var dryRun = await managerV2.RewrapAsync(new KeyChainRewrapOptions
+        {
+            Purpose = "email",
+            OldRsaKeyId = "rsa-v1",
+            DryRun = true
+        });
+
+        Assert.Equal(2, dryRun.ScannedCount);
+        Assert.Equal(1, dryRun.EligibleCount);
+        Assert.Equal(0, dryRun.RewrappedCount);
+        Assert.Equal(1, dryRun.WouldRewrapCount);
+        Assert.Equal(KeyChainRewrapStatus.WouldRewrap, Assert.Single(dryRun.Records).Status);
+        Assert.All(await storage.GetAllAsync(), record => Assert.Equal("rsa-v1", record.RsaKeyId));
+
+        var result = await managerV2.RewrapAsync(new KeyChainRewrapOptions
+        {
+            Purpose = "email",
+            OldRsaKeyId = "rsa-v1"
+        });
+
+        Assert.Equal(1, result.RewrappedCount);
+        var records = await storage.GetAllAsync();
+        Assert.Equal("rsa-v2", records.Single(record => record.Purpose == "email").RsaKeyId);
+        Assert.Equal("rsa-v1", records.Single(record => record.Purpose == "notes").RsaKeyId);
+    }
+
+    [Fact]
+    public async Task RewrapAsync_SkipsAlreadyCurrentKeks()
+    {
+        using var rsa = RSA.Create(2048);
+        var storage = new InMemoryKeyChainStorage();
+        var manager = new KeyChainManager(
+            storage,
+            new TestRsaKeyRingProvider("rsa-v1", ("rsa-v1", rsa)),
+            new EncryptedPropertiesOptions());
+        await manager.GetActiveKeyAsync("default");
+        var before = Assert.Single(await storage.GetAllAsync());
+
+        var result = await manager.RewrapAsync();
+
+        Assert.Equal(1, result.ScannedCount);
+        Assert.Equal(1, result.EligibleCount);
+        Assert.Equal(0, result.RewrappedCount);
+        Assert.Equal(1, result.AlreadyCurrentCount);
+        Assert.Equal(KeyChainRewrapStatus.AlreadyCurrent, Assert.Single(result.Records).Status);
+        var after = Assert.Single(await storage.GetAllAsync());
+        Assert.Equal(before.EncryptedKey, after.EncryptedKey);
+    }
+
+    [Fact]
     public async Task GetActiveKeyAsync_StoresWrapResultRsaKeyId()
     {
         var rsaProvider = new TrackingRsaKeyProvider("configured-key", "versioned-key-id");
@@ -205,6 +354,32 @@ public class KeyChainManagerTests
         Assert.True(records.Single(r => r.Id == newRecord.Id).IsActive);
     }
 
+    [Fact]
+    public async Task InMemoryStorage_TryReplaceKeyAsync_UpdatesMatchingRecordOnly()
+    {
+        var storage = new InMemoryKeyChainStorage();
+        var original = CreateRecord("default", "old");
+        await storage.GetOrActivateAsync("default", rotateBefore: null, original);
+
+        var replacement = CreateReplacement(original);
+        var replaced = await storage.TryReplaceKeyAsync(original, replacement);
+
+        Assert.True(replaced);
+        var current = Assert.Single(await storage.GetAllAsync());
+        Assert.Equal(original.Id, current.Id);
+        Assert.Equal("rsa-v2", current.RsaKeyId);
+        Assert.Equal("new", current.EncryptedKey);
+        Assert.Equal(original.IsActive, current.IsActive);
+
+        var staleReplacement = CreateReplacement(original, "rsa-v3", "newer");
+        var staleReplaced = await storage.TryReplaceKeyAsync(original, staleReplacement);
+
+        Assert.False(staleReplaced);
+        current = Assert.Single(await storage.GetAllAsync());
+        Assert.Equal("rsa-v2", current.RsaKeyId);
+        Assert.Equal("new", current.EncryptedKey);
+    }
+
     private static EncryptedKeyRecord CreateRecord(
         string purpose,
         string encryptedKey,
@@ -219,6 +394,23 @@ public class KeyChainManagerTests
             EncryptedKey = encryptedKey,
             CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             IsActive = true
+        };
+    }
+
+    private static EncryptedKeyRecord CreateReplacement(
+        EncryptedKeyRecord original,
+        string rsaKeyId = "rsa-v2",
+        string encryptedKey = "new")
+    {
+        return new EncryptedKeyRecord
+        {
+            Id = original.Id,
+            Purpose = original.Purpose,
+            RsaKeyId = rsaKeyId,
+            Algorithm = original.Algorithm,
+            EncryptedKey = encryptedKey,
+            CreatedAt = original.CreatedAt,
+            IsActive = original.IsActive
         };
     }
 
@@ -253,6 +445,41 @@ public class KeyChainManagerTests
         {
             UnwrapRsaKeyIds.Add(rsaKeyId);
             return new ValueTask<byte[]>(_rsa.Decrypt(ciphertext, RSAEncryptionPadding.OaepSHA256));
+        }
+    }
+
+    private sealed class TestRsaKeyRingProvider : IRsaKeyProvider
+    {
+        private readonly Dictionary<string, RSA> _keys;
+
+        public TestRsaKeyRingProvider(string currentKeyId, params (string KeyId, RSA Rsa)[] keys)
+        {
+            KeyId = currentKeyId;
+            _keys = keys.ToDictionary(key => key.KeyId, key => key.Rsa, StringComparer.Ordinal);
+        }
+
+        public string KeyId { get; }
+        public string Algorithm => "RSA-OAEP-256";
+
+        public ValueTask<RsaKeyWrapResult> WrapKeyAsync(
+            byte[] plaintext,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var ciphertext = _keys[KeyId].Encrypt(plaintext, RSAEncryptionPadding.OaepSHA256);
+            return new ValueTask<RsaKeyWrapResult>(new RsaKeyWrapResult(ciphertext, KeyId, Algorithm));
+        }
+
+        public ValueTask<byte[]> UnwrapKeyAsync(
+            byte[] ciphertext,
+            string rsaKeyId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_keys.TryGetValue(rsaKeyId, out var rsa))
+                throw new InvalidOperationException($"RSA key '{rsaKeyId}' is not configured.");
+
+            return new ValueTask<byte[]>(rsa.Decrypt(ciphertext, RSAEncryptionPadding.OaepSHA256));
         }
     }
 }

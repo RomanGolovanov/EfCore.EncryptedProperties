@@ -134,6 +134,42 @@ public sealed class DatabaseKeyChainStorageTests
     }
 
     [Fact]
+    public async Task TryReplaceKeyAsync_UpdatesMatchingRecordOnly()
+    {
+        var database = CreateDatabase();
+
+        try
+        {
+            await CreateSchemaAsync(database.ConnectionString);
+            var storage = new DatabaseKeyChainStorage(SqliteFactory.Instance, database.ConnectionString);
+            var original = CreateRecord("default", "old");
+            await storage.GetOrActivateAsync("default", rotateBefore: null, original);
+
+            var replacement = CreateReplacement(original);
+            var replaced = await storage.TryReplaceKeyAsync(original, replacement);
+
+            Assert.True(replaced);
+            var current = Assert.Single(await storage.GetAllAsync());
+            Assert.Equal(original.Id, current.Id);
+            Assert.Equal("rsa-v2", current.RsaKeyId);
+            Assert.Equal("new", current.EncryptedKey);
+            Assert.Equal(original.IsActive, current.IsActive);
+
+            var staleReplacement = CreateReplacement(original, "rsa-v3", "newer");
+            var staleReplaced = await storage.TryReplaceKeyAsync(original, staleReplacement);
+
+            Assert.False(staleReplaced);
+            current = Assert.Single(await storage.GetAllAsync());
+            Assert.Equal("rsa-v2", current.RsaKeyId);
+            Assert.Equal("new", current.EncryptedKey);
+        }
+        finally
+        {
+            DropDatabase(database);
+        }
+    }
+
+    [Fact]
     public async Task GetOrActivateAsync_InvalidCandidate_ThrowsBeforeWriting()
     {
         var database = CreateDatabase();
@@ -201,6 +237,23 @@ public sealed class DatabaseKeyChainStorageTests
             EncryptedKey = encryptedKey,
             CreatedAt = createdAt ?? DateTimeOffset.UtcNow,
             IsActive = isActive
+        };
+    }
+
+    private static EncryptedKeyRecord CreateReplacement(
+        EncryptedKeyRecord original,
+        string rsaKeyId = "rsa-v2",
+        string encryptedKey = "new")
+    {
+        return new EncryptedKeyRecord
+        {
+            Id = original.Id,
+            Purpose = original.Purpose,
+            RsaKeyId = rsaKeyId,
+            Algorithm = original.Algorithm,
+            EncryptedKey = encryptedKey,
+            CreatedAt = original.CreatedAt,
+            IsActive = original.IsActive
         };
     }
 
